@@ -201,6 +201,16 @@ export interface PassiveNode {
   stats: StatBonus[];
   requires: string[];
   allocated: boolean;
+  /** Raw stat text from PoE (e.g. "14% increased Evasion Rating") */
+  displayStats?: string[];
+  /** Ascendancy class name (e.g. "Juggernaut") */
+  ascendancyName?: string;
+  /** Flavor text for keystones */
+  flavourText?: string[];
+  /** Stats granted directly by this node (e.g. +40 Str) */
+  grantedStats?: Record<string, number>;
+  /** Whether this is a jewel socket node */
+  isJewelSocket?: boolean;
 }
 
 export interface Player {
@@ -242,6 +252,16 @@ export interface Player {
   skillGroups: SkillGroup[];
   flasks: (Flask | null)[];
   inventory: Inventory;
+  statBreakdown?: StatBreakdown;
+}
+
+export type StashCategory = "general" | "equipment" | "currency";
+
+export interface Stash {
+  items: Item[];
+  gems: Gem[];
+  currencies: Map<string, number>;
+  maxSlots: number;
 }
 
 export interface Inventory {
@@ -249,6 +269,7 @@ export interface Inventory {
   gems: Gem[];
   currencies: Map<string, number>;
   maxSlots: number;
+  stash?: Stash;
 }
 
 export interface MapMod {
@@ -285,4 +306,91 @@ export interface Monster {
     lightning: number;
     chaos: number;
   };
+}
+
+// ===== 属性来源拆解 =====
+
+export interface StatSource {
+  base: number;
+  equipment: number;
+  passive: number;
+  total: number;
+  /** more 乘率（1.0 = 无额外乘率，如 1.2 表示 20% more） */
+  more?: number;
+  /** increased 叠加值（装备+天赋的 increased 之和） */
+  increased?: number;
+  /** 悬停详情：各来源逐条说明 */
+  details?: StatSourceDetail[];
+}
+
+/** 属性来源单条明细（用于 hover 提示） */
+export interface StatSourceDetail {
+  label: string;
+  value: number;
+  type: "base" | "equipment" | "passive" | "more" | "flask";
+}
+
+export interface DefensiveStats {
+  life: StatSource;
+  mana: StatSource;
+  armor: StatSource;
+  evasion: StatSource;
+  energyShield: StatSource;
+  fireRes: StatSource;
+  coldRes: StatSource;
+  lightningRes: StatSource;
+  chaosRes: StatSource;
+  blockChance: StatSource;
+}
+
+export interface OffensiveStats {
+  increasedDamage: StatSource;
+  attackSpeed: StatSource;
+  critChance: StatSource;
+  critMultiplier: StatSource;
+  accuracy: StatSource;
+}
+
+export interface StatBreakdown {
+  defensive: DefensiveStats;
+  offensive: OffensiveStats;
+  stats: {
+    strength: StatSource;
+    dexterity: StatSource;
+    intelligence: StatSource;
+  };
+}
+
+// ===== DPS 拆解 =====
+
+export interface DpsBreakdown {
+  skillName: string;
+  totalDps: number;
+  baseDamage: number;
+  effectiveSpeed: number;
+  critChance: number;
+  critMultiplier: number;
+  critDpsMultiplier: number;
+  nonCritDps: number;
+  critDps: number;
+  damageType: DamageType;
+  penetration: { fire: number; cold: number; lightning: number; chaos: number };
+  /** 各元素伤害占比 */
+  elementDistribution: { type: DamageType; amount: number; percent: number }[];
+  /** 暴击时每击伤害 */
+  critHitDamage: number;
+  /** 非暴击时每击伤害 */
+  nonCritHitDamage: number;
+}
+
+// ===== 药剂效果描述 =====
+
+export interface FlaskBonusDisplay {
+  flaskName: string;
+  flaskType: FlaskType;
+  isUtility: boolean;
+  bonuses: { label: string; value: string }[];
+  active: boolean;
+  charges: number;
+  maxCharges: number;
 }

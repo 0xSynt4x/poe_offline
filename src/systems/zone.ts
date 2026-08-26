@@ -19,6 +19,7 @@ export interface GameState {
   completedQuests: string[];       // 已完成的任务ID
   pendingRewards: string[];        // 待领取奖励的任务ID
   activeQuests: string[];          // 当前可追踪的任务ID
+  currentZoneResolved: boolean;    // 当前区域是否已完成一次遭遇
 }
 
 export interface ExplorationEntry {
@@ -54,6 +55,7 @@ export interface ExplorationReward {
 
 export class ZoneSystem {
   private state: GameState;
+  private currentZoneResolved = false;
   
   constructor(player: Player, savedState?: Partial<GameState>) {
     this.state = {
@@ -66,7 +68,9 @@ export class ZoneSystem {
       completedQuests: savedState?.completedQuests ?? [],
       pendingRewards: savedState?.pendingRewards ?? [],
       activeQuests: savedState?.activeQuests ?? [],
+      currentZoneResolved: savedState?.currentZoneResolved ?? false,
     };
+    this.currentZoneResolved = this.state.currentZoneResolved;
     // 从存档恢复已完成区域
     if (savedState?.completedZones) {
       this.state.completedZones = [...savedState.completedZones];
@@ -75,6 +79,7 @@ export class ZoneSystem {
     if (this.state.activeQuests.length === 0 && this.state.completedQuests.length === 0) {
       this.refreshAvailableQuests();
     }
+    this.checkQuestCompletion();
   }
   
   // 获取当前状态
@@ -118,6 +123,8 @@ export class ZoneSystem {
     }
     
     this.state.currentZone = zoneId;
+    this.currentZoneResolved = false;
+    this.state.currentZoneResolved = false;
     return true;
   }
   
@@ -152,6 +159,11 @@ export class ZoneSystem {
     // 处理事件
     const result = this.processEvent(zone, event);
     
+    if (result.eventType !== "combat" || !result.monsters || result.monsters.length === 0) {
+      this.currentZoneResolved = true;
+      this.state.currentZoneResolved = true;
+    }
+
     // 记录日志
     this.state.explorationLog.push({
       timestamp: Date.now(),
@@ -424,8 +436,15 @@ export class ZoneSystem {
     };
   }
   
+  /** 标记当前区域的战斗已胜利，可安全离开并写入完成状态。 */
+  markCurrentZoneResolved(): void {
+    this.currentZoneResolved = true;
+    this.state.currentZoneResolved = true;
+  }
+
   // 完成区域
-  completeZone() {
+  completeZone(): boolean {
+    if (!this.currentZoneResolved) return false;
     if (this.state.currentZone && !this.state.completedZones.includes(this.state.currentZone)) {
       this.state.completedZones.push(this.state.currentZone);
       // 检查任务完成条件
@@ -433,6 +452,9 @@ export class ZoneSystem {
       this.refreshAvailableQuests();
     }
     this.state.currentZone = null;
+    this.currentZoneResolved = false;
+    this.state.currentZoneResolved = false;
+    return true;
   }
   
   // ===== 任务系统 =====
@@ -554,6 +576,7 @@ export class ZoneSystem {
           type: gem.type,
           color: gem.color,
           level: 1,
+          experience: 0,
           requiredLevel: gem.requiredLevel,
         });
       }
@@ -566,7 +589,7 @@ export class ZoneSystem {
       const base = randomBase(slot, reward.itemLevel);
       if (base) {
         const item = generateItem(base, reward.itemLevel, Rarity.Rare);
-        // 奖励由控制器在展示探索结果后统一发放。
+        this.state.player.inventory.items.push(item);
       }
     }
     

@@ -94,7 +94,7 @@ export function rollAffix(
     itemLevelReq: tier.itemLevelReq,
     stats: [
       {
-        stat: affixData.id.replace(/_/g, " "), // 简单处理，实际应映射
+        stat: affixData.id.replace(/_([a-z])/g, (_, c) => c.toUpperCase()),
         modType: tier.modType,
         min: tier.min,
         max: tier.max,
@@ -112,7 +112,7 @@ export function generateItem(
   rarity: Rarity
 ): Item {
   // 使用新的Socket系统生成孔和链接
-  const sockets = createSockets(base.type, itemLevel);
+  const sockets = createSockets(base.type, itemLevel, base.sockets);
   
   // 获取基底固有属性
   const implicitData = IMPLICIT_POOL[base.id] || [];
@@ -219,8 +219,28 @@ function generateItemName(
 
 // ===== 通货系统 =====
 
+function rebuildSocketLinks(socketCount: number): number[][] {
+  if (socketCount <= 0) return [];
+  if (socketCount === 1) return [[0]];
+  const links: number[][] = [];
+  let group = [0];
+  for (let index = 0; index < socketCount - 1; index += 1) {
+    const chance = group.length >= 5 ? 0.01 : group.length >= 4 ? 0.05 : group.length >= 3 ? 0.15 : group.length >= 2 ? 0.3 : 0.6;
+    if (Math.random() < chance) group.push(index + 1);
+    else { links.push(group); group = [index + 1]; }
+  }
+  links.push(group);
+  return links;
+}
+
 export function applyCurrency(item: Item, currencyEffect: string): Item {
-  const newItem = { ...item };
+  const newItem: Item = {
+    ...item,
+    implicit: item.implicit.map((affix) => ({ ...affix, stats: affix.stats.map((stat) => ({ ...stat })) })),
+    prefixes: item.prefixes.map((affix) => ({ ...affix, stats: affix.stats.map((stat) => ({ ...stat })) })),
+    suffixes: item.suffixes.map((affix) => ({ ...affix, stats: affix.stats.map((stat) => ({ ...stat })) })),
+    sockets: item.sockets.map((socket) => ({ ...socket, linkedTo: [...socket.linkedTo] })),
+  };
   
   // 从基底数据获取实际标签，而非硬编码
   const baseData = ALL_BASES.find((b) => b.id === newItem.baseId);
@@ -318,26 +338,36 @@ export function applyCurrency(item: Item, currencyEffect: string): Item {
       break;
       
     case "socket":
-      // 工匠石：重新生成孔
-      newItem.sockets = createSockets(newItem.slot, newItem.itemLevel);
+      // 工匠石：按装备基底类型重掷孔数，同时保留词缀和其他物品状态。
+      {
+        const itemType = baseData?.type || newItem.slot;
+        const previousGems = newItem.sockets.map((socket) => socket.gemId);
+        const rerolled = createSockets(itemType, newItem.itemLevel, baseData?.sockets);
+        rerolled.forEach((socket, index) => { socket.gemId = previousGems[index] || null; });
+        newItem.sockets = rerolled;
+      }
       break;
       
     case "link":
-      // 链接石：保持孔数不变，重新生成链接（PoE1行为）
+      // 链接石：只重掷连接关系，保留孔数、孔色和已镶嵌宝石。
       {
-        const baseData2 = ALL_BASES.find((b) => b.id === newItem.baseId);
-        const itemType = baseData2?.type || newItem.slot;
-        newItem.sockets = createSockets(itemType, newItem.itemLevel);
+        const socketCount = newItem.sockets.length;
+        const linkedTo = newItem.sockets.map(() => [] as number[]);
+        for (const group of rebuildSocketLinks(socketCount)) {
+          for (let index = 0; index < group.length; index += 1) {
+            for (let other = index + 1; other < group.length; other += 1) {
+              linkedTo[group[index]].push(group[other]);
+              linkedTo[group[other]].push(group[index]);
+            }
+          }
+        }
+        newItem.sockets = newItem.sockets.map((socket, index) => ({ ...socket, linkedTo: linkedTo[index] }));
       }
       break;
       
     case "color":
-      // 变色石：保持孔数和链接不变，重新随机所有孔的颜色
-      {
-        const baseData3 = ALL_BASES.find((b) => b.id === newItem.baseId);
-        const itemType3 = baseData3?.type || newItem.slot;
-        rerollSocketColors(newItem.sockets, itemType3);
-      }
+      // 变色石：只重掷孔色，保留孔数、链接和已镶嵌宝石。
+      rerollSocketColors(newItem.sockets, baseData?.type || newItem.slot);
       break;
       
     case "add_prefix":

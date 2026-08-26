@@ -1,5 +1,5 @@
 import { PassiveNode, StatBonus, ModType } from "../models/types";
-import { POE_PASSIVE_NODES, PoEPassiveNode, canAllocatePoENode, allocatePoENode, deallocatePoENode, getPoENodeById } from "./poePassiveTree";
+import { POE_PASSIVE_NODES, PoEPassiveNode } from "./poePassiveTree";
 
 // ===== Convert PoE raw data → PassiveNode format =====
 
@@ -24,6 +24,9 @@ function convertPoENode(raw: PoEPassiveNode): PassiveNode {
 
 // ===== Converted node data =====
 export const PASSIVE_NODES: PassiveNode[] = POE_PASSIVE_NODES.map(convertPoENode);
+
+// 当前原型角色使用 Marauder 起点。职业系统接入后应根据 Player class 替换此集合。
+const PASSIVE_ROOT_NODE_IDS = new Set(["31628", "50904", "17765", "24704", "29294"]);
 
 // ===== Cluster definitions (auto-generated from ascendancy data) =====
 
@@ -73,18 +76,20 @@ export function getNodesByCluster(clusterName: string): PassiveNode[] {
 
 export function canAllocateNode(nodeId: string, allocatedNodes: string[]): boolean {
   const node = getNodeById(nodeId);
-  if (!node) return false;
+  if (!node || allocatedNodes.includes(nodeId)) return false;
 
-  // 已分配
-  if (allocatedNodes.includes(nodeId)) return false;
+  // Ascendancy nodes require an ascendancy selection, which the prototype does not have yet.
+  if (node.type === "ascendancy") return false;
+  if (PASSIVE_ROOT_NODE_IDS.has(nodeId)) {
+    return allocatedNodes.length === 0 || allocatedNodes.some((id) => PASSIVE_ROOT_NODE_IDS.has(id));
+  }
 
-  // Jewel sockets are always allocatable (no prerequisites)
-  if (node.isJewelSocket) return true;
-
-  // 检查前置条件
-  if (node.requires.length === 0) return true;
-
-  return node.requires.every((req) => allocatedNodes.includes(req));
+  // The generated data omits filtered class-start nodes from `requires`, so use the
+  // actual undirected graph for every subsequent allocation.
+  return allocatedNodes.some((allocatedId) => {
+    const allocated = getNodeById(allocatedId);
+    return !!allocated && (allocated.connections.includes(nodeId) || node.connections.includes(allocatedId));
+  });
 }
 
 export function allocateNode(nodeId: string, allocatedNodes: string[]): string[] {
@@ -93,21 +98,26 @@ export function allocateNode(nodeId: string, allocatedNodes: string[]): string[]
 }
 
 export function deallocateNode(nodeId: string, allocatedNodes: string[]): string[] {
-  // 检查是否有其他节点依赖此节点
-  const dependentNodes = PASSIVE_NODES.filter(
-    (n) => n.requires.includes(nodeId) && allocatedNodes.includes(n.id)
-  );
+  const remaining = allocatedNodes.filter((id) => id !== nodeId);
+  const roots = remaining.filter((id) => PASSIVE_ROOT_NODE_IDS.has(id));
+  if (roots.length === 0) return [];
 
-  if (dependentNodes.length > 0) {
-    // 先移除依赖节点
-    let newAllocated = allocatedNodes.filter((id) => id !== nodeId);
-    for (const dep of dependentNodes) {
-      newAllocated = deallocateNode(dep.id, newAllocated);
+  const connected = new Set(roots);
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    const current = getNodeById(currentId);
+    if (!current) continue;
+    for (const candidate of remaining) {
+      if (connected.has(candidate)) continue;
+      const node = getNodeById(candidate);
+      if (node && (current.connections.includes(candidate) || node.connections.includes(currentId))) {
+        connected.add(candidate);
+        queue.push(candidate);
+      }
     }
-    return newAllocated;
   }
-
-  return allocatedNodes.filter((id) => id !== nodeId);
+  return remaining.filter((id) => connected.has(id));
 }
 
 export interface PassiveStatModifiers {

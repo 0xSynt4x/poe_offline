@@ -2045,7 +2045,7 @@ html, body {
 /* ===== Passive Tree – PoB Style ===== */
 #passive-view {
   flex: 1;
-  display: flex !important;
+  display: none;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;

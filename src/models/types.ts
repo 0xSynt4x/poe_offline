@@ -306,6 +306,7 @@ export interface Monster {
     lightning: number;
     chaos: number;
   };
+  abilities?: string[];
 }
 
 // ===== 属性来源拆解 =====

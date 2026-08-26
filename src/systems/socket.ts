@@ -16,6 +16,7 @@ export const SOCKET_LIMITS: Record<string, { max: number; colors: GemColor[] }> 
   // 武器
   'sword_1h': { max: 6, colors: [GemColor.Red, GemColor.Red, GemColor.Green] },
   'axe_1h': { max: 6, colors: [GemColor.Red, GemColor.Red, GemColor.Green] },
+  'axe_2h': { max: 6, colors: [GemColor.Red, GemColor.Red, GemColor.Red] },
   'mace_1h': { max: 6, colors: [GemColor.Red, GemColor.Red, GemColor.Blue] },
   'claw': { max: 6, colors: [GemColor.Green, GemColor.Green, GemColor.Red] },
   'dagger': { max: 6, colors: [GemColor.Green, GemColor.Red, GemColor.Blue] },
@@ -75,8 +76,9 @@ export function getMaxSockets(itemType: string): number {
 /**
  * 生成随机孔数
  */
-export function rollSocketCount(itemType: string, itemLevel: number): number {
-  const max = getMaxSockets(itemType);
+export function rollSocketCount(itemType: string, itemLevel: number, socketRange?: { min: number; max: number }): number {
+  const max = Math.min(getMaxSockets(itemType), Math.max(0, socketRange?.max ?? getMaxSockets(itemType)));
+  const min = Math.min(max, Math.max(0, socketRange?.min ?? (max > 0 ? 1 : 0)));
   if (max === 0) return 0;
   
   // PoE1规则：物品等级影响最大孔数
@@ -87,13 +89,14 @@ export function rollSocketCount(itemType: string, itemLevel: number): number {
   else if (itemLevel >= 28) maxBasedOnLevel = 4;
   
   const effectiveMax = Math.min(max, maxBasedOnLevel);
+  const effectiveMin = Math.min(min, effectiveMax);
   
   // 权重：孔数越多概率越低
   const weights = [0, 0, 5, 20, 35, 30, 10]; // 0-6孔的权重
-  const totalWeight = weights.slice(1, effectiveMax + 1).reduce((a, b) => a + b, 0);
+  const totalWeight = weights.slice(effectiveMin, effectiveMax + 1).reduce((a, b) => a + b, 0);
   let random = Math.random() * totalWeight;
   
-  for (let i = 1; i <= effectiveMax; i++) {
+  for (let i = effectiveMin; i <= effectiveMax; i++) {
     random -= weights[i];
     if (random <= 0) return i;
   }
@@ -158,8 +161,8 @@ export function rollLinks(socketCount: number): number[][] {
 /**
  * 创建Socket数组
  */
-export function createSockets(itemType: string, itemLevel: number): Socket[] {
-  const count = rollSocketCount(itemType, itemLevel);
+export function createSockets(itemType: string, itemLevel: number, socketRange?: { min: number; max: number }): Socket[] {
+  const count = rollSocketCount(itemType, itemLevel, socketRange);
   const colors = rollSocketColors(itemType, count);
   const links = rollLinks(count);
   

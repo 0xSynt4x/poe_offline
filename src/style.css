@@ -2108,6 +2108,16 @@ html, body {
   z-index: 20;
 }
 
+.pob-node.type-keystone:hover,
+.pob-node.jewel-socket:hover {
+  transform: translate(-50%, -50%) rotate(45deg) scale(1.35);
+}
+
+.pob-node.type-keystone .pob-node-label,
+.pob-node.jewel-socket .pob-node-label {
+  transform: translateX(-50%) rotate(-45deg);
+}
+
 .pob-node-inner-ring {
   position: absolute;
   inset: 3px;
@@ -2116,9 +2126,59 @@ html, body {
   pointer-events: none;
 }
 
+.pob-node-glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(230, 238, 252, 0.82);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 8px;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 0 4px rgba(255,255,255,0.35);
+}
+
 .pob-node.type-keystone {
   border-style: double;
   border-width: 4px !important;
+  border-radius: 5px;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.pob-node.type-keystone .pob-node-glyph {
+  transform: rotate(-45deg);
+  font-size: 9px;
+}
+
+.pob-node.type-notable {
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 92, 0.18);
+}
+
+.pob-node.type-notable .pob-node-glyph {
+  color: rgba(255, 225, 129, 0.9);
+}
+
+.pob-node.type-ascendancy .pob-node-glyph {
+  color: rgba(211, 193, 255, 0.9);
+  font-size: 7px;
+}
+
+.pob-node.jewel-socket {
+  border-radius: 4px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: rgba(27, 37, 52, 0.92) !important;
+}
+
+.pob-node.jewel-socket .pob-node-inner-ring,
+.pob-node.jewel-socket .pob-node-glyph {
+  transform: rotate(-45deg);
+}
+
+.pob-node.jewel-socket .pob-node-glyph {
+  color: rgba(139, 211, 255, 0.9);
+  font-size: 12px;
 }
 
 .pob-node.search-match {

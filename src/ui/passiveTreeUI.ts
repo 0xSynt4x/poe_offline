@@ -1,5 +1,6 @@
 import { PassiveNode, ModType } from "../models/types";
 import { PASSIVE_NODES, PASSIVE_CLUSTERS, canAllocateNode, allocateNode, deallocateNode, getNodeById } from "../data/passiveTree";
+import { POE_PASSIVE_GROUPS } from "../data/poePassiveTree";
 
 export class PassiveTreeUI {
   private container: HTMLElement | null = null;
@@ -54,6 +55,22 @@ export class PassiveTreeUI {
       x: wx * this.SCALE * this.zoom + this.panX,
       y: wy * this.SCALE * this.zoom + this.panY,
     };
+  }
+
+  /**
+   * GGG's `in`/`out` graph also contains allocation-rule links for Ascendant
+   * paths. PoB only draws connectors within the same ascendancy group.
+   */
+  private isRenderableConnection(node: PassiveNode, connNode: PassiveNode): boolean {
+    return (node.ascendancyName || null) === (connNode.ascendancyName || null);
+  }
+
+  private getNodeGlyph(node: PassiveNode): string {
+    if (node.isJewelSocket) return "◇";
+    if (node.type === "keystone") return "◆";
+    if (node.type === "notable") return "✦";
+    if (node.type === "ascendancy") return "✧";
+    return "";
   }
 
   init(containerId: string, onAllocate: (nodeId: string) => void, onDeallocate: (nodeId: string) => void) {
@@ -236,6 +253,40 @@ export class PassiveTreeUI {
     }
   }
 
+  private drawGroupBackgrounds(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    for (const group of POE_PASSIVE_GROUPS) {
+      if (group.orbitRadii.length === 0) continue;
+
+      const center = this.worldToScreen(group.x, group.y);
+      const outerRadius = group.radius * this.SCALE * this.zoom;
+      if (center.x + outerRadius < -20 || center.x - outerRadius > w + 20
+        || center.y + outerRadius < -20 || center.y - outerRadius > h + 20) continue;
+
+      if (!group.hasBackground) continue;
+      const isAscendancy = !!group.ascendancyName;
+      const fill = isAscendancy ? "rgba(133, 92, 210, 0.075)" : "rgba(62, 95, 130, 0.06)";
+      const stroke = isAscendancy ? "rgba(167, 139, 250, 0.30)" : "rgba(105, 139, 177, 0.22)";
+
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, outerRadius, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = Math.max(0.5, this.zoom * 0.9);
+      ctx.setLineDash([Math.max(1, this.zoom * 3), Math.max(2, this.zoom * 5)]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      for (const orbitRadius of group.orbitRadii) {
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, orbitRadius * this.SCALE * this.zoom, 0, Math.PI * 2);
+        ctx.strokeStyle = isAscendancy ? "rgba(167, 139, 250, 0.13)" : "rgba(105, 139, 177, 0.10)";
+        ctx.lineWidth = Math.max(0.35, this.zoom * 0.65);
+        ctx.stroke();
+      }
+    }
+  }
+
   private drawCanvas() {
     if (!this.ctx || !this.canvas) return;
     const dpr = window.devicePixelRatio || 1;
@@ -255,6 +306,9 @@ export class PassiveTreeUI {
     // Stars
     this.drawStars(this.ctx, w, h);
 
+    // Group backgrounds and orbit guides sit below the connectors.
+    this.drawGroupBackgrounds(this.ctx, w, h);
+
     // Connection lines
     const drawn = new Set<string>();
     for (const node of PASSIVE_NODES) {
@@ -264,7 +318,7 @@ export class PassiveTreeUI {
         drawn.add(key);
 
         const connNode = getNodeById(connId);
-        if (!connNode) continue;
+        if (!connNode || !this.isRenderableConnection(node, connNode)) continue;
 
         const p1 = this.worldToScreen(node.x, node.y);
         const p2 = this.worldToScreen(connNode.x, connNode.y);
@@ -333,6 +387,7 @@ export class PassiveTreeUI {
       if (canAlloc && !isAllocated) cls += " available";
       if (isMatch) cls += " search-match";
       cls += ` type-${node.type}`;
+      if (node.isJewelSocket) cls += " jewel-socket";
 
       let fillColor = "#1a2030";
       let borderColor = "#3a4a60";
@@ -380,19 +435,23 @@ export class PassiveTreeUI {
         }
       }
 
-      const size = node.type === "keystone" ? 24 : node.type === "notable" ? 18 : node.type === "ascendancy" ? 14 : 12;
-      const borderW = node.type === "keystone" ? 3 : node.type === "notable" ? 2.5 : 2;
+      const size = node.isJewelSocket ? 18 : node.type === "keystone" ? 24 : node.type === "notable" ? 18 : node.type === "ascendancy" ? 14 : 12;
+      const borderW = node.type === "keystone" ? 3 : node.type === "notable" ? 2.5 : node.isJewelSocket ? 2 : 2;
+      const glyph = this.getNodeGlyph(node);
       const pos = this.worldToScreen(node.x, node.y);
 
       // Skip labels for normal nodes when zoomed out
-      const showLabel = this.zoom > 0.5 || node.type !== "normal";
+      const showLabel = this.zoom > 0.72 || isMatch || isAllocated;
 
       html += `<div class="${cls}" data-node-id="${node.id}"
         style="left:${pos.x}px;top:${pos.y}px;width:${size}px;height:${size}px;
         background:${fillColor};border:${borderW}px solid ${borderColor};
         ${glowSize > 0 ? `box-shadow:0 0 ${glowSize}px ${glowColor};` : ""}">`;
-      if (node.type === "keystone" || node.type === "notable") {
+      if (node.type === "keystone" || node.type === "notable" || node.isJewelSocket) {
         html += `<div class="pob-node-inner-ring"></div>`;
+      }
+      if (glyph) {
+        html += `<span class="pob-node-glyph" aria-hidden="true">${glyph}</span>`;
       }
       if (showLabel) {
         html += `<span class="pob-node-label">${node.name}</span>`;
@@ -402,6 +461,7 @@ export class PassiveTreeUI {
 
     // Cluster labels (ascendancy)
     for (const cluster of PASSIVE_CLUSTERS) {
+      if (this.zoom < 0.58) continue;
       const pos = this.worldToScreen(cluster.center.x, cluster.center.y - 0.8);
       if (pos.x > -200 && pos.x < viewW + 200 && pos.y > -100 && pos.y < viewH + 100) {
         html += `<div class="pob-cluster-label" style="left:${pos.x}px;top:${pos.y}px;">${cluster.name}</div>`;
@@ -454,7 +514,7 @@ export class PassiveTreeUI {
         if (drawn.has(key)) continue;
         drawn.add(key);
         const connNode = getNodeById(connId);
-        if (!connNode) continue;
+        if (!connNode || !this.isRenderableConnection(node, connNode)) continue;
         const isActive = this.allocatedNodes.includes(node.id) && this.allocatedNodes.includes(connId);
         ctx.beginPath();
         ctx.moveTo(toMiniX(node.x), toMiniY(node.y));

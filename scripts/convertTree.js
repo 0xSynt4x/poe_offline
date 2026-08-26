@@ -20,6 +20,7 @@ if (!fs.existsSync(INPUT)) {
 const raw = JSON.parse(fs.readFileSync(INPUT, 'utf-8'));
 const { nodes, groups, constants, classes } = raw;
 const { skillsPerOrbit, orbitRadii } = constants;
+const MAX_RENDER_EDGE_DISTANCE = 8; // scaled world units; normal passive links are local
 
 // Calculate angle for a given orbit index (matches GGG/PoB logic)
 function calcOrbitAngle(orbitIndex, skillsInOrbit) {
@@ -30,20 +31,29 @@ function calcOrbitAngle(orbitIndex, skillsInOrbit) {
     return (2 * Math.PI * orbitIndex) / 6;
   }
 
-  // For orbits with 16 nodes (orbits 2 & 3 post-3.17): irregular spacing
-  // The angles are symmetric per quarter
+  // For orbits with 16 nodes (orbits 2 & 3 post-3.17): irregular spacing.
   if (skillsInOrbit === 16) {
     const angles = [
       0, 30, 45, 60, 90, 120, 135, 150,
       180, 210, 225, 240, 270, 300, 315, 330,
     ];
-    const idx = orbitIndex % 16;
-    // Determine which quarter
-    const quarter = Math.floor(orbitIndex / 16);
-    return Math.PI / 180 * (angles[idx] + quarter * 360);
+    return Math.PI / 180 * angles[orbitIndex % 16];
   }
 
-  // Generic even spacing for other orbit sizes
+  // Orbit 4 also uses irregular spacing (10-degree steps plus 45-degree points).
+  // The generic 360 / 40 spacing shifts nodes by up to 4.5 degrees and makes
+  // otherwise adjacent nodes appear disconnected.
+  if (skillsInOrbit === 40) {
+    const angles = [
+      0, 10, 20, 30, 40, 45, 50, 60, 70, 80,
+      90, 100, 110, 120, 130, 135, 140, 150, 160, 170,
+      180, 190, 200, 210, 220, 225, 230, 240, 250, 260,
+      270, 280, 290, 300, 310, 315, 320, 330, 340, 350,
+    ];
+    return Math.PI / 180 * angles[orbitIndex % 40];
+  }
+
+  // Generic even spacing for other orbit sizes.
   return (2 * Math.PI * orbitIndex) / skillsInOrbit;
 }
 
@@ -87,7 +97,21 @@ function getConnections(nodeId) {
   const connSet = new Set();
   if (node.out) node.out.forEach((id) => connSet.add(id));
   if (node.in) node.in.forEach((id) => connSet.add(id));
-  return Array.from(connSet);
+  return Array.from(connSet).filter((id) => isRenderableTreeEdge(nodeId, id));
+}
+
+// Ascendant path nodes use cross-tree links for allocation rules. Those links
+// are not physical connectors on the passive tree and must not be drawn.
+function isRenderableTreeEdge(nodeId, otherId) {
+  const node = nodes[nodeId];
+  const other = nodes[otherId];
+  if (!node || !other) return false;
+  if ((node.ascendancyName || null) !== (other.ascendancyName || null)) return false;
+
+  const nodePos = calcNodePosition(node);
+  const otherPos = calcNodePosition(other);
+  const distance = Math.hypot(nodePos.x - otherPos.x, nodePos.y - otherPos.y) / 100;
+  return distance <= MAX_RENDER_EDGE_DISTANCE;
 }
 
 // Build a reverse map: nodeId -> all connecting nodeIds
@@ -97,6 +121,47 @@ function getRequires(nodeId) {
   const node = nodes[nodeId];
   if (!node) return [];
   return node.in || [];
+}
+
+// Build visual group metadata from the same coordinates used by nodes.
+function buildPassiveGroups(skipIds) {
+  return Object.entries(groups)
+    .map(([groupId, group]) => {
+      const groupNodeIds = (group.nodes || []).filter((nodeId) => {
+        const node = nodes[nodeId];
+        return node && !skipIds.has(nodeId) && node.group !== undefined;
+      });
+      if (groupNodeIds.length === 0) return null;
+
+      const groupNodes = groupNodeIds.map((nodeId) => nodes[nodeId]);
+      const center = { x: group.x / 100, y: group.y / 100 };
+      const radius = Math.max(
+        1.2,
+        ...groupNodes.map((node) => {
+          const pos = calcNodePosition(node);
+          return Math.hypot(pos.x / 100 - center.x, pos.y / 100 - center.y);
+        })
+      );
+      const orbitRadiiForGroup = [...new Set(groupNodes
+        .map((node) => node.orbit)
+        .filter((orbit) => Number.isInteger(orbit)))]
+        .sort((a, b) => a - b)
+        .map((orbit) => (orbitRadii[orbit] || 0) / 100)
+        .filter((orbitRadius) => orbitRadius > 0);
+      const ascendancyName = groupNodes.find((node) => node.ascendancyName)?.ascendancyName;
+
+      return {
+        id: String(groupId),
+        x: center.x,
+        y: center.y,
+        radius: radius + 1.1,
+        orbitRadii: orbitRadiiForGroup,
+        nodes: groupNodeIds.map((nodeId) => String(nodes[nodeId].skill || nodeId)),
+        hasBackground: !!group.background,
+        ...(ascendancyName && { ascendancyName }),
+      };
+    })
+    .filter(Boolean);
 }
 
 // Build clusters from groups
@@ -168,16 +233,50 @@ function convert() {
     classMap[clsId] = cls;
   }
 
-  let nodeIdx = 0;
+  // Class start node names to filter (these are GGG internal nodes, not real passives)
+  const classStartNames = [
+    'MARAUDER', 'RANGER', 'WITCH', 'DUELIST', 'TEMPLAR',
+    'SIX', 'Seven', 'Shadow', 'Scion',
+    'Warden of the Maji', 'Warlock of the Mists', 'Wildwood Primalist',
+  ];
+  // Ascendancy start hub names (orbit 0 nodes with multiple connections, no stats)
+  const ascendancyStartNames = [
+    'Guardian', 'Juggernaut', 'Chieftain', 'Berserker',
+    'Slayer', 'Gladiator', 'Champion', 'Deadeye', 'Raider', 'Pathfinder',
+    'Assassin', 'Trickster', 'Saboteur', 'Necromancer', 'Elementalist', 'Occultist',
+    'Hierophant', 'Inquisitor', 'Battlemage', 'Warlord', 'Ascendant',
+  ];
+  // Set of node IDs to skip
+  const skipIds = new Set();
   for (const [nodeId, node] of Object.entries(nodes)) {
     // Skip masteries, proxies, multiple choice options
-    if (node.isMastery) continue;
-    if (node.isProxy) continue;
-    if (node.isMultipleChoiceOption) continue;
+    if (node.isMastery) { skipIds.add(nodeId); continue; }
+    if (node.isProxy) { skipIds.add(nodeId); continue; }
+    if (node.isMultipleChoiceOption) { skipIds.add(nodeId); continue; }
     // Skip blighted nodes
-    if (node.isBlighted) continue;
+    if (node.isBlighted) { skipIds.add(nodeId); continue; }
     // Skip nodes without group (bloodline, cluster jewel notables, etc.)
-    if (node.group === undefined) continue;
+    if (node.group === undefined) { skipIds.add(nodeId); continue; }
+    // Skip root meta-node (GGG internal)
+    if (nodeId === '0') { skipIds.add(nodeId); continue; }
+    // Ascendancy starts are allocation hubs, not visible passive nodes.
+    if (node.isAscendancyStart) { skipIds.add(nodeId); continue; }
+    // Skip class start nodes (no stats, all-caps names)
+    if (classStartNames.includes(node.name) && (!node.stats || node.stats.length === 0)) {
+      skipIds.add(nodeId); continue;
+    }
+    // Skip ascendancy start hub nodes (no stats, many connections)
+    if (node.ascendancyName && ascendancyStartNames.includes(node.name)
+        && (!node.stats || node.stats.length === 0)
+        && ((node.in?.length || 0) + (node.out?.length || 0)) >= 4) {
+      skipIds.add(nodeId); continue;
+    }
+  }
+
+  let nodeIdx = 0;
+  for (const [nodeId, node] of Object.entries(nodes)) {
+    // Skip filtered nodes
+    if (skipIds.has(nodeId)) continue;
 
     const pos = calcNodePosition(node);
     const nodeType = getNodeType(node);
@@ -212,9 +311,9 @@ function convert() {
       type: nodeType,
       x: Math.round(x * 100) / 100,
       y: Math.round(y * 100) / 100,
-      connections: connections.map((id) => String(nodes[id]?.skill || id)),
+      connections: connections.filter((id) => !skipIds.has(id) && nodes[id]).map((id) => String(nodes[id]?.skill || id)),
       displayStats,
-      requires: requires.map((id) => String(nodes[id]?.skill || id)),
+      requires: requires.filter((id) => !skipIds.has(id) && nodes[id]).map((id) => String(nodes[id]?.skill || id)),
       allocated: false,
       ...(ascendancyName && { ascendancyName }),
       ...(flavourText.length > 0 && { flavourText }),
@@ -230,7 +329,8 @@ function convert() {
   // Now fix up connections and requires to use the new IDs
   // (they should already be correct since we used node.skill)
 
-  // Build clusters
+  // Build visual groups and ascendancy labels.
+  const passiveGroups = buildPassiveGroups(skipIds);
   const clusters = buildClusters().filter((c) => c.isAscendancy);
 
   // Generate TypeScript
@@ -255,6 +355,19 @@ export interface PoEPassiveNode {
   grantedStats?: Record<string, number>;
   isJewelSocket?: boolean;
 }
+
+export interface PoEPassiveGroup {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  orbitRadii: number[];
+  nodes: string[];
+  ascendancyName?: string;
+  hasBackground: boolean;
+}
+
+export const POE_PASSIVE_GROUPS: PoEPassiveGroup[] = ${JSON.stringify(passiveGroups, null, 2)};
 
 export const POE_PASSIVE_NODES: PoEPassiveNode[] = [
 `;

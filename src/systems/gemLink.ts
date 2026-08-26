@@ -507,34 +507,3 @@ export function createSkillGroup(activeGemId: string, supportGemIds: string[] = 
   }
   return { id: `skill_${Date.now()}`, name: activeData.name, activeGem, supportGems };
 }
-
-export function formatSkillGroup(group: SkillGroup): string {
-  const computed = computeSkillGroup(group);
-  const lines = [
-    `${group.activeGem.name} (${computed.totalDamage} ${computed.damageType})`,
-    `  标签: ${computed.tags.join(", ")}`,
-    `  伤害倍率: ${(computed.multiplier * 100).toFixed(0)}%`,
-    `  魔力消耗: ${computed.manaCost}`,
-    `  施法时间: ${computed.castTime.toFixed(2)}s`,
-  ];
-  const parts = computed.damageParts.map((part) => `${part.type}:${Math.floor(part.amount)}`).join(", ");
-  if (parts) lines.push(`  伤害组成: ${parts}`);
-  const penetrations = [
-    computed.firePenetration > 0 ? `火${computed.firePenetration}%` : "",
-    computed.coldPenetration > 0 ? `冰${computed.coldPenetration}%` : "",
-    computed.lightningPenetration > 0 ? `雷${computed.lightningPenetration}%` : "",
-    computed.chaosPenetration > 0 ? `混${computed.chaosPenetration}%` : "",
-  ].filter(Boolean);
-  if (penetrations.length) lines.push(`  穿透: ${penetrations.join(", ")}`);
-  if (computed.critChanceBonus || computed.critMultiplierBonus) {
-    lines.push(`  暴击: ${computed.critChanceBonus >= 0 ? "+" : ""}${computed.critChanceBonus}% 几率, ${computed.critMultiplierBonus >= 0 ? "+" : ""}${computed.critMultiplierBonus}% 伤害`);
-  }
-  if (computed.specialEffects.length) lines.push(`  特殊效果: ${computed.specialEffects.join(", ")}`);
-  return lines.join("\n");
-}
-
-export function testGemSystem(): void {
-  console.log(formatSkillGroup(createSkillGroup("lacerate", ["melee_physical_damage", "added_fire_damage"])));
-  console.log(formatSkillGroup(createSkillGroup("fireball", ["controlled_destruction", "fire_penetration"])));
-  console.log(formatSkillGroup(createSkillGroup("lightning_arrow", ["chain"])));
-}

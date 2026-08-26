@@ -386,14 +386,14 @@ export function generateMonster(template: MonsterTemplate, zoneLevel: number): M
   const baseDamage = 5 + level * 2;
   
   return {
-    id: `${template.id}_${Date.now()}`,
+    id: `${template.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     name: template.name,
     level,
     life: Math.floor(baseLife * template.lifeMultiplier),
     maxLife: Math.floor(baseLife * template.lifeMultiplier),
     damage: [
       {
-        stat: "physicalDamage",
+        stat: `${template.damageType}Damage`,
         modType: "flat" as any,
         min: Math.floor(baseDamage * template.damageMultiplier * 0.8),
         max: Math.floor(baseDamage * template.damageMultiplier * 1.2),
@@ -404,11 +404,17 @@ export function generateMonster(template: MonsterTemplate, zoneLevel: number): M
     accuracy: 30 + level * 5,
     armor: template.armor,
     evasion: template.evasion,
-    resistances: template.resistances,
+    resistances: { ...template.resistances },
+    abilities: template.abilities ? [...template.abilities] : [],
   };
 }
 
-export function generateMonstersForZone(zone: Zone): Monster[] {
+export function generateMonstersForZone(zone: Zone, mapEffects?: {
+  monsterDamage?: number;
+  monsterLife?: number;
+  monsterSpeed?: number;
+  monsterCount?: number;
+}): Monster[] {
   const zoneLevel = Math.floor(
     (zone.levelRange[0] + zone.levelRange[1]) / 2
   );
@@ -419,20 +425,43 @@ export function generateMonstersForZone(zone: Zone): Monster[] {
     // Boss区域只有Boss
     const bossTemplate = zone.monsterPool.find((m) => m.isBoss);
     if (bossTemplate) {
-      return [generateMonster(bossTemplate, zoneLevel)];
+      const boss = generateMonster(bossTemplate, zoneLevel);
+      applyMonsterMapEffects(boss, mapEffects);
+      return [boss];
     }
   }
   
-  // 普通区域：1-3只怪物
-  const monsterCount = 1 + Math.floor(Math.random() * 2);
+  // 普通区域：1-3只怪物，地图词缀可增加数量。
+  const baseMonsterCount = 1 + Math.floor(Math.random() * 2);
+  const monsterCount = Math.max(1, Math.ceil(baseMonsterCount * (1 + (mapEffects?.monsterCount || 0) / 100)));
   const monsters: Monster[] = [];
   
   for (let i = 0; i < monsterCount; i++) {
     const template = zone.monsterPool[Math.floor(Math.random() * zone.monsterPool.length)];
-    monsters.push(generateMonster(template, zoneLevel));
+    const monster = generateMonster(template, zoneLevel);
+    applyMonsterMapEffects(monster, mapEffects);
+    monster.abilities = template.abilities ? [...template.abilities] : [];
+    monsters.push(monster);
   }
   
   return monsters;
+}
+
+function applyMonsterMapEffects(monster: Monster, mapEffects?: {
+  monsterDamage?: number;
+  monsterLife?: number;
+  monsterSpeed?: number;
+}): void {
+  const damageBonus = mapEffects?.monsterDamage || 0;
+  const lifeBonus = mapEffects?.monsterLife || 0;
+  const speedBonus = mapEffects?.monsterSpeed || 0;
+  monster.life = Math.max(1, Math.floor(monster.life * (1 + lifeBonus / 100)));
+  monster.maxLife = monster.life;    monster.damage = monster.damage.map((damage) => {
+      const min = Math.max(0, Math.floor(damage.min * (1 + damageBonus / 100)));
+      const max = Math.max(min, Math.floor(damage.max * (1 + damageBonus / 100)));
+      return { ...damage, min, max };
+    });
+  monster.attackSpeed = Math.max(0.05, monster.attackSpeed * (1 + speedBonus / 100));
 }
 
 export function calculateExpReward(zone: Zone, monsterLevel: number): number {

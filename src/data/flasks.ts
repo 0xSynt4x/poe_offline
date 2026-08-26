@@ -76,23 +76,6 @@ export function createDefaultFlasks(): Flask[] {
   return FLASK_DEFINITIONS.map(cloneDefinition);
 }
 
-export function restoreFlasks(raw: unknown): (Flask | null)[] {
-  if (!Array.isArray(raw) || raw.length === 0) return createDefaultFlasks();
-
-  return Array.from({ length: FLASK_SLOT_COUNT }, (_, index) => {
-    const saved = raw[index] as Partial<Flask> | null | undefined;
-    if (!saved) return null;
-
-    const definition = getFlaskDefinition(saved.id || "");
-    if (!definition) return null;
-
-    return {
-      ...cloneDefinition(definition),
-      charges: Math.max(0, Math.min(definition.maxCharges, Number(saved.charges) || 0)),
-    };
-  });
-}
-
 export function getFlaskTypeLabel(type: FlaskType): string {
   const labels: Record<FlaskType, string> = {
     life: "生命",

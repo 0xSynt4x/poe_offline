@@ -1,7 +1,14 @@
-import { Player, Monster, Item, EquipSlot, DamageType, SkillGroup, Flask, ModType } from "../models/types";
-import { computeSkillGroup, ComputedSkill } from "./gemLink";
+import { Player, Monster, DamageType, SkillGroup, Flask } from "../models/types";
+import { computeSkillGroup, ComputedSkill, DamagePart } from "./gemLink";
 
 // ===== 战斗实体 =====
+
+function randomInt(min: number, max: number): number {
+  const lower = Math.ceil(Math.min(min, max));
+  const upper = Math.floor(Math.max(min, max));
+  if (upper <= lower) return lower;
+  return Math.floor(Math.random() * (upper - lower + 1)) + lower;
+}
 
 interface CombatEntity {
   id: string;
@@ -30,6 +37,10 @@ interface CombatEntity {
   accuracy: number;
   increasedDamage: number;
   moreDamage: number;
+  damage: { min: number; max: number };
+  damageType: DamageType;
+  abilities: string[];
+  abilityUses: Set<string>;
   
   // 状态
   statusEffects: StatusEffect[];
@@ -37,12 +48,35 @@ interface CombatEntity {
   isDead: boolean;
 }
 
-interface StatusEffect {
+export interface StatusEffect {
   type: "ignite" | "freeze" | "shock" | "bleed" | "poison";
-  damage?: number;
+  /** 每回合/每跳造成的持续伤害（ignite/bleed/poison） */
+  damagePerTick: number;
+  /** 剩余持续回合数 */
   duration: number;
+  /** 暴击倍率加成（ignite） */
   multiplier?: number;
+  /** shock：增加受到伤害的百分比 */
+  increasedDamageTaken?: number;
 }
+
+/** 异常状态图标映射 */
+export const AILMENT_ICONS: Record<StatusEffect["type"], string> = {
+  ignite: "🔥",
+  freeze: "❄️",
+  shock: "⚡",
+  bleed: "🩸",
+  poison: "☠️",
+};
+
+/** 异常状态中文名 */
+export const AILMENT_NAMES: Record<StatusEffect["type"], string> = {
+  ignite: "点燃",
+  freeze: "冰冻",
+  shock: "感电",
+  bleed: "流血",
+  poison: "中毒",
+};
 
 // ===== 行动条系统 =====
 
@@ -65,77 +99,166 @@ function calculateActionSpeed(entity: CombatEntity, skill?: SkillGroup): number 
   const haste = entity.utilityBuffs
     .filter((buff) => buff.utility === "haste")
     .reduce((total, buff) => total + buff.value, 0);
-  return speed * (1 + haste / 100);
+  return Math.max(0.05, speed * (1 + haste / 100));
 }
 
 // ===== 战斗计算 =====
 
+export interface DamageResult {
+  damage: number;
+  isCrit: boolean;
+  damageType: DamageType;
+  isMiss: boolean;
+  /** 防御计算前的各类型伤害（用于分别计算护甲/抗性和异常状态） */
+  damageParts: DamagePart[];
+  /** 防御计算前的总伤害（用于异常状态伤害计算） */
+  baseDamageForAilment: number;
+  /** 各异常状态的施加概率（0-100） */
+  ailmentChances: {
+    ignite: number;
+    freeze: number;
+    shock: number;
+    bleed: number;
+    poison: number;
+  };
+}
+
 function calculateDamage(
   attacker: CombatEntity,
   defender: CombatEntity,
-  skill?: SkillGroup
-): { damage: number; isCrit: boolean; damageType: DamageType } {
-  let baseDamage = 10; // 默认基础伤害
-  let damageType = DamageType.Physical;
-  
+  skill?: SkillGroup,
+  attackerIsPlayer: boolean = false,
+): DamageResult {
+  let computedSkill: ComputedSkill | null = null;
+  let damageParts: DamagePart[] = skill
+    ? []
+    : [{ type: attacker.damageType, amount: randomInt(attacker.damage.min, attacker.damage.max) }];
   if (skill) {
-    const computed = computeSkillGroup(skill);
-    baseDamage = computed.totalDamage;
-    damageType = computed.damageType;
+    computedSkill = computeSkillGroup(skill);
+    damageParts = computedSkill.damageParts.map((part) => ({ ...part }));
   }
-  
-  // 应用伤害加成
+
+  // 角色/药剂的伤害加成作用于所有伤害部分。
   const utilityDamage = attacker.utilityBuffs
     .filter((buff) => buff.utility === "offense")
     .reduce((total, buff) => total + buff.value, 0);
-  baseDamage *= (1 + (attacker.increasedDamage + utilityDamage) / 100);
-  baseDamage *= attacker.moreDamage;
-  
-  // 暴击判定
+  const damageMultiplier = Math.max(0, (1 + (attacker.increasedDamage + utilityDamage) / 100) * Math.max(0, attacker.moreDamage));
+  for (const part of damageParts) part.amount *= damageMultiplier;
+
   let isCrit = false;
-  if (Math.random() * 100 < attacker.critChance) {
-    isCrit = true;
-    baseDamage *= attacker.critMultiplier / 100;
-  }
-  
-  // 命中判定
+  const effectiveCritChance = Math.min(100, Math.max(0, attacker.critChance + (attackerIsPlayer && computedSkill ? computedSkill.critChanceBonus : 0)));
+  const effectiveCritMultiplier = Math.max(100, attacker.critMultiplier + (attackerIsPlayer && computedSkill ? computedSkill.critMultiplierBonus : 0));
+
+  const damageType = computedSkill?.damageType || attacker.damageType || DamageType.Physical;
+  const zeroResult = {
+    damage: 0,
+    isCrit: false,
+    damageType,
+    isMiss: true,
+    damageParts: [],
+    baseDamageForAilment: 0,
+    ailmentChances: { ignite: 0, freeze: 0, shock: 0, bleed: 0, poison: 0 },
+  };
   const hitChance = Math.min(95, Math.max(5, 50 + attacker.accuracy - defender.evasion / 10));
-  if (Math.random() * 100 > hitChance) {
-    return { damage: 0, isCrit: false, damageType };
+  if (Math.random() * 100 >= hitChance) return zeroResult;
+
+  if (Math.random() * 100 < effectiveCritChance) {
+    isCrit = true;
+    for (const part of damageParts) part.amount *= effectiveCritMultiplier / 100;
   }
-  
-  // 防御计算
-  let finalDamage = baseDamage;
-  
-  if (damageType === DamageType.Physical) {
-    // 物理伤害被护甲减免
-    const guard = defender.utilityBuffs
-      .filter((buff) => buff.utility === "guard")
-      .reduce((total, buff) => total + buff.value, 0);
-    const effectiveArmor = defender.armor * (1 + guard / 100);
-    const physicalReduction = Math.min(90, effectiveArmor / (effectiveArmor + 5 * finalDamage));
-    finalDamage *= (1 - physicalReduction / 100);
-  } else {
-    // 元素伤害被抗性减免
-    let resistance = 0;
-    switch (damageType) {
-      case DamageType.Fire:
-        resistance = defender.resistances.fire;
-        break;
-      case DamageType.Cold:
-        resistance = defender.resistances.cold;
-        break;
-      case DamageType.Lightning:
-        resistance = defender.resistances.lightning;
-        break;
-      case DamageType.Chaos:
-        resistance = defender.resistances.chaos;
-        break;
+
+  const baseDamageForAilment = Math.max(1, Math.floor(damageParts.reduce((total, part) => total + part.amount, 0)));
+  if (damageParts.length === 0 || baseDamageForAilment <= 0) return { ...zeroResult, isMiss: false };
+  const finalParts = damageParts.map((part) => ({ ...part }));
+  const guard = defender.utilityBuffs
+    .filter((buff) => buff.utility === "guard")
+    .reduce((total, buff) => total + buff.value, 0);
+  const effectiveArmor = defender.armor * (1 + guard / 100);
+  for (const part of finalParts) {
+    if (part.type === DamageType.Physical) {
+      const physicalReduction = effectiveArmor <= 0
+        ? 0
+        : Math.min(90, effectiveArmor / (effectiveArmor + 5 * Math.max(1, part.amount)) * 100);
+      part.amount *= 1 - physicalReduction / 100;
+      continue;
     }
-    finalDamage *= (1 - resistance / 100);
+    const resistance = part.type === DamageType.Fire ? defender.resistances.fire
+      : part.type === DamageType.Cold ? defender.resistances.cold
+      : part.type === DamageType.Lightning ? defender.resistances.lightning
+      : defender.resistances.chaos;
+    const penetration = attackerIsPlayer && computedSkill
+      ? part.type === DamageType.Fire ? computedSkill.firePenetration
+      : part.type === DamageType.Cold ? computedSkill.coldPenetration
+      : part.type === DamageType.Lightning ? computedSkill.lightningPenetration
+      : computedSkill.chaosPenetration
+      : 0;
+    const damageMultiplier = Math.max(0, 1 - (resistance - penetration) / 100);
+    part.amount *= damageMultiplier;
   }
+
+  let finalDamage = finalParts.reduce((total, part) => total + part.amount, 0);
+  const shockEffect = defender.statusEffects
+    .filter((effect) => effect.type === "shock" && effect.duration > 0)
+    .reduce((total, effect) => total + (effect.increasedDamageTaken ?? 0), 0);
+  if (shockEffect > 0) finalDamage *= 1 + shockEffect / 100;
+
+  const ailmentChances = calculateAilmentChances(
+    attackerIsPlayer && computedSkill ? computedSkill : null,
+    finalParts,
+    isCrit,
+  );
+  return {
+    damage: Math.max(1, Math.floor(finalDamage)),
+    isCrit,
+    damageType: computedSkill ? computedSkill.damageType : attacker.damageType,
+    isMiss: false,
+    damageParts: finalParts,
+    baseDamageForAilment,
+    ailmentChances,
+  };
+}
+
+/**
+ * 根据技能数据和攻击类型，计算各异常状态的施加概率。
+ * PoE 规则：
+ * - 点燃：火焰伤害技能 + 攻击者 igniteChance
+ * - 冰冻：冰冷伤害技能 + 攻击者 freezeChance
+ * - 感电：闪电伤害技能 + 攻击者 shockChance
+ * - 流血：物理伤害 + 攻击者 bleedChance（从 gemLink 用 bleedChance 复用）
+ * - 中毒：任意伤害 + 攻击者 poisonChance（从 gemLink 用 maimChance 复用）
+ * - 暴击时基础概率 40%
+ */
+function calculateAilmentChances(
+  computedSkill: ComputedSkill | null,
+  damageParts: DamagePart[],
+  isCrit: boolean,
+): { ignite: number; freeze: number; shock: number; bleed: number; poison: number } {
+  // 暴击的基础异常状态概率
+  const critBase = isCrit ? 40 : 0;
   
-  return { damage: Math.max(1, Math.floor(finalDamage)), isCrit, damageType };
+  // 从技能获取的施加概率（gemLink 中 igniteChance/freezeChance/shockChance）
+  const skillIgnite = computedSkill?.igniteChance ?? 0;
+  const skillFreeze = computedSkill?.freezeChance ?? 0;
+  const skillShock = computedSkill?.shockChance ?? 0;
+  // bleed/poison 复用 gemLink 中的 maimChance（流血）和 ailmentDuration（中毒）字段
+  const skillBleed = computedSkill?.maimChance ?? 0;
+  const skillPoison = computedSkill?.ailmentDuration ?? 0;
+  
+  const hasType = (type: DamageType) => damageParts.some((part) => part.type === type && part.amount > 0);
+  const noElementalAilments = computedSkill?.noElementalAilments ?? false;
+  const baseIgnite = hasType(DamageType.Fire) && !noElementalAilments ? 10 : 0;
+  const baseFreeze = hasType(DamageType.Cold) && !noElementalAilments ? 10 : 0;
+  const baseShock = hasType(DamageType.Lightning) && !noElementalAilments ? 10 : 0;
+  const baseBleed = hasType(DamageType.Physical) ? 8 : 0;
+  const basePoison = hasType(DamageType.Physical) || hasType(DamageType.Chaos) ? 5 : 0;
+  
+  return {
+    ignite: noElementalAilments ? 0 : Math.min(100, baseIgnite + skillIgnite + critBase),
+    freeze: noElementalAilments ? 0 : Math.min(100, baseFreeze + skillFreeze + critBase),
+    shock: noElementalAilments ? 0 : Math.min(100, baseShock + skillShock + critBase),
+    bleed: Math.min(100, baseBleed + skillBleed + critBase),
+    poison: Math.min(100, basePoison + skillPoison + (critBase > 0 ? critBase / 2 : 0)),
+  };
 }
 
 // ===== 战斗系统 =====
@@ -178,6 +301,10 @@ export class CombatSystem {
       accuracy: player.offense.accuracy,
       increasedDamage: player.offense.increasedDamage,
       moreDamage: player.offense.moreDamage,
+      damage: { min: 0, max: 0 },
+      damageType: DamageType.Physical,
+      abilities: [],
+      abilityUses: new Set(),
       statusEffects: [],
       utilityBuffs: [],
       isDead: false,
@@ -200,12 +327,27 @@ export class CombatSystem {
       accuracy: monster.accuracy,
       increasedDamage: 0,
       moreDamage: 1,
+      damage: this.getMonsterDamage(monster),
+      damageType: monster.damageType,
+      abilities: monster.abilities || [],
+      abilityUses: new Set(),
       statusEffects: [],
       utilityBuffs: [],
       isDead: false,
     };
   }
   
+  private getMonsterDamage(monster: Monster): { min: number; max: number } {
+    const values = monster.damage
+      .filter((stat) => Number.isFinite(stat.min) && Number.isFinite(stat.max))
+      .map((stat) => ({ min: Math.max(0, stat.min), max: Math.max(stat.min, stat.max) }));
+    if (values.length === 0) return { min: 0, max: 0 };
+    return {
+      min: values.reduce((total, value) => total + value.min, 0),
+      max: values.reduce((total, value) => total + value.max, 0),
+    };
+  }
+
   private initActionQueue() {
     // 玩家初始行动点
     this.actionQueue.push({
@@ -251,13 +393,23 @@ export class CombatSystem {
     // 玩家行动
     const computedSkill = skill ? computeSkillGroup(skill) : null;
     const manaCost = computedSkill?.manaCost || 0;
-    if ((this.player.mana || 0) < manaCost) {
+    const availableMana = Math.max(0, (this.player.mana || 0) - (this.player.manaReserved || 0));
+    if (availableMana < manaCost) {
       result.actions.push({
         type: "status",
         message: "魔力不足，无法使用该技能",
       });
       return result;
     }
+    // 检查玩家是否被冰冻；被控时不消耗魔力或行动点。
+    if (this.isPlayerFrozen()) {
+      result.actions.push({
+        type: "status",
+        message: "你被冰冻了，无法行动！",
+      });
+      return result;
+    }
+
     this.player.mana = (this.player.mana || 0) - manaCost;
     const speed = calculateActionSpeed(this.player, skill);
     const actionEntry = this.actionQueue.find((a) => a.isPlayer);
@@ -273,24 +425,38 @@ export class CombatSystem {
       return result;
     }
     
-    // 计算伤害
-    const { damage, isCrit, damageType } = calculateDamage(this.player, target, skill);
+    // 计算伤害（使用增强的穿透和暴击计算）
+    const damageResult = calculateDamage(this.player, target, skill, true);
     
-    if (damage > 0) {
+    if (!damageResult.isMiss && damageResult.damage > 0) {
       // 应用伤害
-      this.applyDamage(target, damage);
+      this.applyDamage(target, damageResult.damage);
+      
+      // 构建伤害信息
+      let damageInfo = `${damageResult.damage} 点${damageResult.damageType}伤害`;
+      if (damageResult.isCrit) damageInfo += "（暴击！）";
+      if (computedSkill && computedSkill.firePenetration > 0 && damageResult.damageType === DamageType.Fire) {
+        damageInfo += ` [穿透${computedSkill.firePenetration}%]`;
+      } else if (computedSkill && computedSkill.coldPenetration > 0 && damageResult.damageType === DamageType.Cold) {
+        damageInfo += ` [穿透${computedSkill.coldPenetration}%]`;
+      } else if (computedSkill && computedSkill.lightningPenetration > 0 && damageResult.damageType === DamageType.Lightning) {
+        damageInfo += ` [穿透${computedSkill.lightningPenetration}%]`;
+      }
       
       result.actions.push({
         type: "attack",
         attacker: this.player.name,
         target: target.name,
-        damage,
-        damageType,
-        isCrit,
-        message: `${this.player.name} 使用 ${skill?.activeGem.name || "普通攻击"} 对 ${target.name} 造成了 ${damage} 点${damageType}伤害${isCrit ? "（暴击！）" : ""}`,
+        damage: damageResult.damage,
+        damageType: damageResult.damageType,
+        isCrit: damageResult.isCrit,
+        message: `${this.player.name} 使用 ${skill?.activeGem.name || "普通攻击"} 对 ${target.name} 造成了 ${damageInfo}`,
       });
       
-      result.damageDealt = damage;
+      result.damageDealt = damageResult.damage;
+      
+      // 施加异常状态
+      this.applyAilments(target, damageResult.ailmentChances, damageResult.baseDamageForAilment, true, damageResult.isCrit, result, computedSkill);
       
       // 检查目标死亡
       if (target.isDead) {
@@ -365,9 +531,44 @@ export class CombatSystem {
       winner: null,
     };
     
+    this.turnCount += 1;
+
+    // 有召唤能力的怪物在首次敌方回合生成一个较弱的召唤物。
+    for (const monster of [...this.monsters]) {
+      if (!monster.isDead && monster.abilities.includes("summon") && !monster.abilityUses.has("summon")) {
+        monster.abilityUses.add("summon");
+        const summoned: CombatEntity = {
+          ...monster,
+          id: `${monster.id}_summon_${this.turnCount}`,
+          name: `${monster.name}的召唤物`,
+          maxLife: Math.max(1, Math.floor(monster.maxLife * 0.35)),
+          life: Math.max(1, Math.floor(monster.maxLife * 0.35)),
+          damage: {
+            min: Math.max(1, Math.floor(monster.damage.min * 0.4)),
+            max: Math.max(1, Math.floor(monster.damage.max * 0.4)),
+          },
+          abilities: [],
+          abilityUses: new Set(),
+          statusEffects: [],
+        };
+        this.monsters.push(summoned);
+        this.actionQueue.push({ entity: summoned, nextAction: 100, isPlayer: false });
+        result.actions.push({ type: "status", message: `${monster.name} 召唤了一个援军！` });
+      }
+    }
+
     // 处理所有怪物
-    for (const monster of this.monsters) {
+    for (const monster of [...this.monsters]) {
       if (monster.isDead) continue;
+      
+      // 冰冻的怪物跳过行动
+      if (monster.statusEffects.some((e) => e.type === "freeze" && e.duration > 0)) {
+        result.actions.push({
+          type: "status",
+          message: `${monster.name} 被冰冻，无法行动！`,
+        });
+        continue;
+      }
       
       // 计算行动速度
       const speed = calculateActionSpeed(monster);
@@ -376,24 +577,36 @@ export class CombatSystem {
         actionEntry.nextAction += 100 / speed;
       }
       
-      // 计算伤害
-      const { damage, isCrit, damageType } = calculateDamage(monster, this.player);
+      // 怪物词条能力对当前行动生效，基础伤害仍来自 Monster.damage 区间。
+      const abilityMultiplier = (monster.abilities.includes("enrage") && monster.life <= monster.maxLife * 0.5 ? 1.5 : 1)
+        * (monster.abilities.includes("cleave") ? 1.1 : 1);
+      const monsterAttacker = abilityMultiplier === 1 ? monster : {
+        ...monster,
+        damage: {
+          min: Math.floor(monster.damage.min * abilityMultiplier),
+          max: Math.floor(monster.damage.max * abilityMultiplier),
+        },
+      };
+      const damageResult = calculateDamage(monsterAttacker, this.player);
       
-      if (damage > 0) {
+      if (!damageResult.isMiss && damageResult.damage > 0) {
         // 应用伤害
-        this.applyDamage(this.player, damage);
+        this.applyDamage(this.player, damageResult.damage);
         
         result.actions.push({
           type: "attack",
           attacker: monster.name,
           target: this.player.name,
-          damage,
-          damageType,
-          isCrit,
-          message: `${monster.name} 攻击了 ${this.player.name}，造成了 ${damage} 点${damageType}伤害${isCrit ? "（暴击！）" : ""}`,
+          damage: damageResult.damage,
+          damageType: damageResult.damageType,
+          isCrit: damageResult.isCrit,
+          message: `${monster.name} 攻击了 ${this.player.name}，造成了 ${damageResult.damage} 点${damageResult.damageType}伤害${damageResult.isCrit ? "（暴击！）" : ""}`,
         });
         
-        result.damageTaken += damage;
+        // 怪物施加异常状态（概率较低）
+        this.applyAilments(this.player, damageResult.ailmentChances, damageResult.baseDamageForAilment, false, damageResult.isCrit, result, null);
+        
+        result.damageTaken += damageResult.damage;
       } else {
         result.actions.push({
           type: "miss",
@@ -420,6 +633,7 @@ export class CombatSystem {
   }
   
   private applyDamage(entity: CombatEntity, damage: number) {
+    damage = Math.max(0, Math.floor(damage));
     // 先扣能量护盾
     if (entity.energyShield > 0) {
       const esDamage = Math.min(entity.energyShield, damage);
@@ -435,19 +649,124 @@ export class CombatSystem {
     }
   }
   
+  /**
+   * 对目标施加异常状态。
+   * 每种异常状态独立掷骰，成功则添加或刷新效果。
+   * 同类型效果取较高值刷新（不叠加，而是延长/增强）。
+   */
+  private applyAilments(
+    target: CombatEntity,
+    chances: { ignite: number; freeze: number; shock: number; bleed: number; poison: number },
+    baseDamageForAilment: number,
+    attackerIsPlayer: boolean,
+    isCrit: boolean,
+    result: CombatResult,
+    computedSkill: ComputedSkill | null,
+  ) {
+    const ailmentDamageMultiplier = (isCrit ? 1.5 : 1.0) * (1 + (computedSkill?.ailmentDamage ?? 0) / 100);
+    const ailmentBaseDuration = Math.max(1, Math.floor(4 * (1 + ((computedSkill?.ailmentDuration ?? 0) + (computedSkill?.durationBonus ?? 0)) / 100)));
+    const targetMaxLife = target.maxLife || 100;
+
+    // 点燃：火焰持续伤害
+    if (Math.random() * 100 < chances.ignite) {
+      const igniteDmg = Math.max(1, Math.floor(baseDamageForAilment * 0.2 * ailmentDamageMultiplier));
+      this.applyOrRefreshAilment(target, "ignite", igniteDmg, ailmentBaseDuration);
+      result.actions.push({
+        type: "ailment",
+        message: `${target.name} 被点燃了！（每回合 ${igniteDmg} 火焰伤害）`,
+      });
+    }
+
+    // 冰冻：眩晕若干回合（用 damagePerTick=0, duration 表示眩晕回合）
+    if (Math.random() * 100 < chances.freeze) {
+      // 冰冻时间基于冰冷伤害占生命比例：0.3 * (dmg / maxLife)，最少 1 回合，最多 3 回合
+      const freezeRatio = Math.min(1, baseDamageForAilment / targetMaxLife);
+      const freezeTurns = Math.max(1, Math.min(3, Math.floor((freezeRatio * 6 + 1) * (1 + (computedSkill?.freezeDuration ?? 0) / 100))));
+      this.applyOrRefreshAilment(target, "freeze", 0, freezeTurns);
+      result.actions.push({
+        type: "ailment",
+        message: `${target.name} 被冰冻了！（${freezeTurns} 回合无法行动）`,
+      });
+    }
+
+    // 感电：增加受到的伤害
+    if (Math.random() * 100 < chances.shock) {
+      const shockEffect = Math.min(50, Math.floor((15 + baseDamageForAilment / targetMaxLife * 30) * (1 + (computedSkill?.shockEffect ?? 0) / 100)));
+      this.applyOrRefreshAilment(target, "shock", 0, ailmentBaseDuration, shockEffect);
+      result.actions.push({
+        type: "ailment",
+        message: `${target.name} 被感电了！（受到伤害 +${shockEffect}%）`,
+      });
+    }
+
+    // 流血：物理持续伤害（只有攻击者移动时触发，文字游戏简化为每回合触发）
+    if (Math.random() * 100 < chances.bleed) {
+      const bleedDmg = Math.max(1, Math.floor(baseDamageForAilment * 0.1 * ailmentDamageMultiplier));
+      this.applyOrRefreshAilment(target, "bleed", bleedDmg, ailmentBaseDuration);
+      result.actions.push({
+        type: "ailment",
+        message: `${target.name} 正在流血！（每回合 ${bleedDmg} 物理伤害）`,
+      });
+    }
+
+    // 中毒：混沌持续伤害，可叠加（最多 5 层）
+    if (Math.random() * 100 < chances.poison) {
+      const poisonDmg = Math.max(1, Math.floor(baseDamageForAilment * 0.08 * ailmentDamageMultiplier));
+      const existingPoisons = target.statusEffects.filter((e) => e.type === "poison").length;
+      if (existingPoisons < 5) {
+        target.statusEffects.push({ type: "poison", damagePerTick: poisonDmg, duration: ailmentBaseDuration });
+        result.actions.push({
+          type: "ailment",
+          message: `${target.name} 中毒了！（每回合 ${poisonDmg} 混沌伤害 · ${existingPoisons + 1} 层）`,
+        });
+      }
+    }
+  }
+
+  /**
+   * 刷新或添加异常状态：同类型取较高伤害和较长持续时间。
+   * 中毒例外：中毒可叠加层数。
+   */
+  private applyOrRefreshAilment(
+    target: CombatEntity,
+    type: StatusEffect["type"],
+    newDamage: number,
+    newDuration: number,
+    increasedDamageTaken?: number,
+  ) {
+    const existing = target.statusEffects.find((e) => e.type === type);
+    if (existing) {
+      // 刷新：取较高伤害，延长持续时间
+      existing.damagePerTick = Math.max(existing.damagePerTick, newDamage);
+      existing.duration = Math.max(existing.duration, newDuration);
+      if (increasedDamageTaken !== undefined) {
+        existing.increasedDamageTaken = Math.max(existing.increasedDamageTaken ?? 0, increasedDamageTaken);
+      }
+    } else {
+      target.statusEffects.push({
+        type,
+        damagePerTick: newDamage,
+        duration: newDuration,
+        ...(increasedDamageTaken !== undefined ? { increasedDamageTaken } : {}),
+      });
+    }
+  }
+
   private processStatusEffects() {
-    // 处理所有实体的状态效果
     const allEntities = [this.player, ...this.monsters];
     
     for (const entity of allEntities) {
       if (entity.isDead) continue;
       
-      for (const effect of entity.statusEffects) {
+      // 冰冻：跳过行动（在 monsterTurn 中处理，此处只减少持续时间）
+      const isFrozen = entity.statusEffects.some((e) => e.type === "freeze" && e.duration > 0);
+      
+      for (const effect of [...entity.statusEffects]) {
         if (effect.duration <= 0) continue;
         
-        // 处理持续伤害
-        if (effect.damage) {
-          this.applyDamage(entity, effect.damage);
+        // 持续伤害：ignite/bleed/poison
+        if (effect.damagePerTick > 0 && effect.type !== "freeze") {
+          this.applyDamage(entity, effect.damagePerTick);
         }
         
         effect.duration--;
@@ -456,6 +775,35 @@ export class CombatSystem {
       // 移除过期效果
       entity.statusEffects = entity.statusEffects.filter((e) => e.duration > 0);
     }
+  }
+
+  /**
+   * 获取指定实体的当前异常状态列表（供 UI 使用）。
+   */
+  getEntityStatusEffects(entityId: string): StatusEffect[] {
+    if (entityId === "player") {
+      return [...this.player.statusEffects];
+    }
+    const monster = this.monsters.find((m) => m.id === entityId);
+    return monster ? [...monster.statusEffects] : [];
+  }
+
+  /**
+   * 获取所有怪物的异常状态（供 UI 批量渲染）。
+   */
+  getAllMonsterStatusEffects(): { id: string; name: string; effects: StatusEffect[] }[] {
+    return this.monsters.map((m) => ({
+      id: m.id,
+      name: m.name,
+      effects: [...m.statusEffects],
+    }));
+  }
+
+  /**
+   * 检查玩家是否被冰冻（当前回合无法行动）。
+   */
+  isPlayerFrozen(): boolean {
+    return this.player.statusEffects.some((e) => e.type === "freeze" && e.duration > 0);
   }
   
   isCombatOver(): boolean {
@@ -466,21 +814,24 @@ export class CombatSystem {
     return this.combatLog;
   }
   
-  getMonsterStatus(): { name: string; life: number; maxLife: number; isDead: boolean }[] {
+  getMonsterStatus(): { name: string; life: number; maxLife: number; isDead: boolean; statusEffects: StatusEffect[] }[] {
     return this.monsters.map((m) => ({
       name: m.name,
       life: m.life,
       maxLife: m.maxLife,
       isDead: m.isDead,
+      statusEffects: [...m.statusEffects],
     }));
   }
   
-  getPlayerStatus(): { life: number; maxLife: number; mana: number; maxMana: number } {
+  getPlayerStatus(): { life: number; maxLife: number; mana: number; maxMana: number; energyShield: number; statusEffects: StatusEffect[] } {
     return {
       life: this.player.life,
       maxLife: this.player.maxLife,
       mana: this.player.mana || 0,
       maxMana: this.player.maxMana || 0,
+      energyShield: this.player.energyShield,
+      statusEffects: [...this.player.statusEffects],
     };
   }
   
@@ -501,127 +852,11 @@ export interface CombatResult {
 }
 
 interface CombatAction {
-  type: "attack" | "miss" | "death" | "status" | "flask";
+  type: "attack" | "miss" | "death" | "status" | "flask" | "ailment";
   attacker?: string;
   target?: string;
   damage?: number;
   damageType?: DamageType;
   isCrit?: boolean;
   message: string;
-}
-
-// ===== 测试函数 =====
-
-export function testCombatSystem() {
-  console.log("=== 战斗系统测试 ===\n");
-  
-  // 创建测试玩家
-  const player: Player = {
-    name: "测试战士",
-    level: 10,
-    experience: 0,
-    stats: { strength: 30, dexterity: 20, intelligence: 15 },
-    life: 500,
-    maxLife: 500,
-    mana: 100,
-    maxMana: 100,
-    manaReserved: 0,
-    energyShield: 0,
-    defenses: {
-      armor: 100,
-      evasion: 50,
-      energyShield: 0,
-      fireRes: 0,
-      coldRes: 0,
-      lightningRes: 0,
-      chaosRes: -30,
-      blockChance: 0,
-    },
-    offense: {
-      increasedDamage: 0,
-      moreDamage: 1,
-      attackSpeed: 1,
-      critChance: 5,
-      critMultiplier: 150,
-      accuracy: 100,
-    },
-    passivePoints: 0,
-    allocatedNodes: [],
-    equipment: {},
-    skillGroups: [],
-    flasks: [],
-    inventory: {
-      items: [],
-      gems: [],
-      currencies: new Map(),
-      maxSlots: 50,
-    },
-  };
-  
-  // 创建测试怪物
-  const monsters: Monster[] = [
-    {
-      id: "skeleton_1",
-      name: "骸骨战士",
-      level: 5,
-      life: 100,
-      maxLife: 100,
-      damage: [{ stat: "physicalDamage", modType: ModType.Flat, min: 5, max: 10 }],
-      damageType: DamageType.Physical,
-      attackSpeed: 1,
-      accuracy: 50,
-      armor: 20,
-      evasion: 10,
-      resistances: { fire: 0, cold: 0, lightning: 0, chaos: 0 },
-    },
-    {
-      id: "skeleton_2",
-      name: "骸骨弓手",
-      level: 5,
-      life: 80,
-      maxLife: 80,
-      damage: [{ stat: "physicalDamage", modType: ModType.Flat, min: 8, max: 12 }],
-      damageType: DamageType.Physical,
-      attackSpeed: 1.2,
-      accuracy: 60,
-      armor: 10,
-      evasion: 30,
-      resistances: { fire: 0, cold: 0, lightning: 0, chaos: 0 },
-    },
-  ];
-  
-  // 创建战斗系统
-  const combat = new CombatSystem(player, monsters);
-  
-  // 模拟3回合战斗
-  for (let turn = 0; turn < 3; turn++) {
-    console.log(`--- 回合 ${turn + 1} ---`);
-    
-    // 玩家攻击
-    const playerResult = combat.executePlayerAttack();
-    for (const action of playerResult.actions) {
-      console.log(action.message);
-    }
-    
-    // 怪物攻击
-    const monsterResult = combat.executeMonsterTurn();
-    for (const action of monsterResult.actions) {
-      console.log(action.message);
-    }
-    
-    // 显示状态
-    const playerStatus = combat.getPlayerStatus();
-    const monsterStatus = combat.getMonsterStatus();
-    
-    console.log(`\n玩家: ${playerStatus.life}/${playerStatus.maxLife} HP`);
-    for (const m of monsterStatus) {
-      console.log(`${m.name}: ${m.life}/${m.maxLife} HP${m.isDead ? " (死亡)" : ""}`);
-    }
-    console.log();
-    
-    if (combat.isCombatOver()) {
-      console.log("战斗结束！");
-      break;
-    }
-  }
 }

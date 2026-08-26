@@ -5,22 +5,23 @@ import { getBasesBySlot } from "../data/bases";
 import { generateItem, formatItem, calculateItemStats, applyCurrency } from "../systems/affix";
 import { randomBase, ALL_BASES } from "../data/bases";
 import { CURRENCIES, getCurrencyById } from "../data/currencies";
-import { createSkillGroup, computeSkillGroup, addGemExperience, getGemProgress } from "../systems/gemLink";
+import { createSkillGroup, computeSkillGroup, addGemExperience, estimateDps, canSupportSkill, getSupportRequirementLabel } from "../systems/gemLink";
 import { ItemDetailUI } from "./itemDetail";
 import { getGemById, GemData } from "../data/gems";
 import { socketGem, unsocketGem, getLinkGroups, getColorName } from "../systems/socket";
-import { CombatSystem } from "../systems/combat";
+import { CombatSystem, AILMENT_ICONS, AILMENT_NAMES } from "../systems/combat";
 import { PassiveTreeUI } from "./passiveTreeUI";
 import { calculatePassiveModifiers } from "../data/passiveTree";
 import { ZoneSystem, ExplorationResult, ExplorationReward } from "../systems/zone";
 import { Zone, ALL_ZONES, getZoneById } from "../data/zones";
-import { saveManager, SaveSlot } from "../systems/saveLoad";
+import { saveManager, SaveData, SaveSlot } from "../systems/saveLoad";
 import { ALL_QUESTS, Quest } from "../data/story";
-import { FLASK_SLOT_COUNT, createDefaultFlasks, getFlaskTypeLabel, getUtilityLabel, restoreFlasks } from "../data/flasks";
+import { FLASK_SLOT_COUNT, createDefaultFlasks, getFlaskTypeLabel, getUtilityLabel } from "../data/flasks";
+import { RightPanel } from "./rightPanel";
 
 // ===== UI状态 =====
 
-export type MainView = "menu" | "zone-select" | "scene" | "combat" | "map-device";
+export type MainView = "menu" | "zone-select" | "scene" | "combat" | "map-device" | "passive";
 
 export type UtilityPanel =
   | "character"
@@ -62,10 +63,13 @@ export class UIController {
   private mainView: MainView = "menu";
   private previousMainView: MainView = "zone-select";
   private selectedMapId: string | null = null;
+  private craftingTargetId: string | null = null;
   private combatRewardResolved = false;
   private combatTurnNumber = 0;
+  private rightPanel: RightPanel;
   
   constructor() {
+    this.rightPanel = new RightPanel();
     this.state = {
       player: this.createDefaultPlayer(),
       currentTab: "items",
@@ -83,7 +87,11 @@ export class UIController {
   
   // 初始化UI
   init() {
-    this.gameAreaMarkup = document.getElementById("game-area")?.innerHTML || "";
+    this.rightPanel.init();
+    this.rightPanel.setPlayer(this.state.player);
+    // Capture the full center-panel content for restoration after main menu
+    const centerPanel = document.getElementById("center-panel");
+    this.gameAreaMarkup = centerPanel?.innerHTML || "";
     this.showMainMenu();
   }
 
@@ -94,11 +102,20 @@ export class UIController {
       scene: "scene-display",
       combat: "combat-display",
       "map-device": "map-device-display",
+      passive: "passive-view",
     };
 
     for (const [key, id] of Object.entries(displayIds)) {
       const element = document.getElementById(id);
       if (element) element.style.display = key === view ? "block" : "none";
+    }
+
+    // 当天赋树内联显示时，隐藏中心面板（装备/技能/仓库等抽屉）
+    const centerPanels = document.getElementById("center-panels");
+    const centerPanel = document.getElementById("center-panel");
+    if (view === "passive") {
+      if (centerPanels) centerPanels.classList.remove("is-open");
+      if (centerPanel) centerPanel.classList.remove("panels-open");
     }
   }
 
@@ -111,10 +128,10 @@ export class UIController {
   showMainMenu() {
     this.mainView = "menu";
     this.setMainView("menu");
-    const mainArea = document.getElementById("game-area");
-    if (!mainArea) return;
-    
-    mainArea.innerHTML = `
+    // Replace center-panel content with menu
+    const centerPanel = document.getElementById("center-panel");
+    if (!centerPanel) return;
+    centerPanel.innerHTML = `
       <div class="panel main-menu">
         <h2 class="panel-title">⚔️ PoE文字游戏</h2>
         <div class="menu-buttons">
@@ -143,7 +160,7 @@ export class UIController {
       loadButton.addEventListener("click", () => this.showLoadMenu());
     }
     document.getElementById("btn-save-game")?.addEventListener("click", () => this.showSaveMenu());
-    
+
     // 检查是否有存档
     if (saveManager.hasSaves()) {
       document.getElementById("btn-load-game")?.removeAttribute("disabled");
@@ -154,7 +171,7 @@ export class UIController {
     if (this.gameStarted) {
       return document.querySelector<HTMLElement>("[data-save-menu]");
     }
-    return document.querySelector<HTMLElement>("#game-area #menu-saves");
+    return document.querySelector<HTMLElement>("#center-panel #menu-saves");
   }
 
   // 显示加载菜单
@@ -298,13 +315,9 @@ export class UIController {
     this.state.inCombat = false;
     this.state.combat = null;
     
-    // 恢复地图数据（如果有）
-    if (saveData.mapDevice) {
-      this.mapDevice = new MapDevice();
-      this.mapDevice.restoreState(saveData.mapDevice);
-    } else {
-      this.mapDevice = new MapDevice();
-    }
+    // 恢复地图数据
+    this.mapDevice = new MapDevice();
+    this.mapDevice.restoreState(saveData.mapDevice);
     
     // 启动游戏
     this.startGame();
@@ -313,9 +326,9 @@ export class UIController {
   }
   
   // 从存档恢复玩家数据
-  private createPlayerFromSave(saveData: any): Player {
+  private createPlayerFromSave(saveData: SaveData): Player {
     const playerData = saveData.player;
-    
+
     return {
       name: playerData.name,
       level: playerData.level,
@@ -325,24 +338,30 @@ export class UIController {
       maxLife: playerData.maxLife,
       mana: playerData.mana,
       maxMana: playerData.maxMana,
-      manaReserved: playerData.manaReserved || 0,
-      energyShield: playerData.energyShield || 0,
+      manaReserved: playerData.manaReserved,
+      energyShield: playerData.energyShield,
       defenses: { ...playerData.defenses },
       offense: { ...playerData.offense },
       passivePoints: playerData.passivePoints,
       allocatedNodes: [...playerData.allocatedNodes],
-      equipment: playerData.equipment || {},
-      skillGroups: (playerData.skillGroups || []).map((group: any) => ({
+      equipment: { ...playerData.equipment },
+      skillGroups: playerData.skillGroups.map((group) => ({
         ...group,
-        activeGem: { ...group.activeGem, experience: group.activeGem?.experience || 0 },
-        supportGems: (group.supportGems || []).map((gem: any) => ({ ...gem, experience: gem.experience || 0 })),
+        activeGem: { ...group.activeGem },
+        supportGems: group.supportGems.map((gem) => ({ ...gem })),
       })),
-      flasks: restoreFlasks(playerData.flasks),
+      flasks: playerData.flasks.map((flask) => flask ? { ...flask, effect: { ...flask.effect } } : null),
       inventory: {
-        items: playerData.inventory.items || [],
-        gems: playerData.inventory.gems || [],
-        currencies: new Map(Object.entries(playerData.inventory.currencies || {})),
-        maxSlots: playerData.inventory.maxSlots || 50,
+        items: [...playerData.inventory.items],
+        gems: playerData.inventory.gems.map((gem) => ({ ...gem })),
+        currencies: new Map(Object.entries(playerData.inventory.currencies)),
+        maxSlots: playerData.inventory.maxSlots,
+        stash: {
+          items: [...playerData.inventory.stash.items],
+          gems: playerData.inventory.stash.gems.map((gem) => ({ ...gem })),
+          currencies: new Map(Object.entries(playerData.inventory.stash.currencies)),
+          maxSlots: playerData.inventory.stash.maxSlots,
+        },
       },
     };
   }
@@ -362,17 +381,17 @@ export class UIController {
   private startGame() {
     this.gameStarted = true;
 
-    // 主菜单会替换游戏区内容，开始游戏时恢复原始游戏壳。
-    const mainArea = document.getElementById("game-area");
-    if (mainArea && !document.getElementById("zone-select-display")) {
-      mainArea.innerHTML = this.gameAreaMarkup || "";
+    // Restore center-panel layout (menu replaces it, game needs original shell).
+    const centerPanel = document.getElementById("center-panel");
+    if (centerPanel && !document.getElementById("zone-select-display")) {
+      centerPanel.innerHTML = this.gameAreaMarkup || "";
       this.eventsBound = false;
     }
     
-    // 初始化游戏界面
+    // Initialize game UI
     this.initGameUI();
     
-    // 开始自动保存
+    // Start auto-save
     saveManager.startAutoSave(() => {
       this.autoSave();
     });
@@ -380,8 +399,6 @@ export class UIController {
   
   // 初始化游戏UI
   private initGameUI() {
-    const sideNav = document.getElementById("side-nav");
-    if (sideNav) sideNav.style.display = "flex";
     this.bindEvents();
     if (!this.itemDetailInitialized) {
       this.itemDetailUI.init(
@@ -392,10 +409,11 @@ export class UIController {
       );
       this.itemDetailInitialized = true;
     }
+    this.rightPanel.setPlayer(this.state.player);
     this.recalculatePlayerStats();
     this.updateAllUI();
     this.setMainView("zone-select");
-    this.showUtilityPanel("character");
+    this.showCenterPanel("character");
     this.updateZoneListUI();
     
     // 初始化天赋树UI
@@ -434,10 +452,6 @@ export class UIController {
       });
     });
 
-    document.getElementById("drawer-close")?.addEventListener("click", () => {
-      this.closeUtilityPanel();
-    });
-
     // 标签切换
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", (e) => {
@@ -446,9 +460,21 @@ export class UIController {
         this.switchTab(tabName);
       });
     });
+
+    // 存储中心右栏（背包）：接收仓库物品拖回（容器级一次性绑定）
+    const inventoryContent = document.getElementById("inventory-content");
+    if (inventoryContent) {
+      inventoryContent.addEventListener("dragover", (event) => { event.preventDefault(); inventoryContent.classList.add("drop-target"); });
+      inventoryContent.addEventListener("dragleave", () => inventoryContent.classList.remove("drop-target"));
+      inventoryContent.addEventListener("drop", (event) => {
+        event.preventDefault();
+        inventoryContent.classList.remove("drop-target");
+        this.handleStorageDrop(event.dataTransfer?.getData("text/plain") || "");
+      });
+    }
     
     // 装备槽点击
-    document.querySelectorAll<HTMLElement>('[data-panel-content="equipment"] .equip-slot').forEach((slot) => {
+    document.querySelectorAll<HTMLElement>('.center-section[data-panel-content="equipment"] .equip-slot').forEach((slot) => {
       slot.addEventListener("click", (e) => {
         const target = e.currentTarget as HTMLElement;
         const slotName = target.dataset.slot as EquipSlot;
@@ -457,7 +483,7 @@ export class UIController {
     });
     
     // 技能槽点击：左键施放，右键打开 Build 配置。
-    document.querySelectorAll<HTMLElement>('[data-panel-content="skills"] .skill-slot').forEach((slot) => {
+    document.querySelectorAll<HTMLElement>('.center-section[data-panel-content="skills"] .skill-slot').forEach((slot) => {
       slot.addEventListener("click", (e) => {
         const target = e.currentTarget as HTMLElement;
         this.useSkill(parseInt(target.dataset.key || "1"));
@@ -521,19 +547,7 @@ export class UIController {
     document.getElementById("btn-open-map")?.addEventListener("click", () => this.openSelectedMap());
     document.getElementById("btn-close-map-device")?.addEventListener("click", () => this.closeMapDevice());
     
-    // 天赋树模态框
-    const modalClose = document.querySelector("#passive-modal .modal-close");
-    if (modalClose) {
-      modalClose.addEventListener("click", () => this.closePassiveTree());
-    }
-    
-    const modal = document.getElementById("passive-modal");
-    if (modal) {
-      modal.addEventListener("click", (e) => {
-        if (e.target === modal) this.closePassiveTree();
-      });
-    }
-    
+    // 天赋树重置按钮
     const btnResetPassive = document.getElementById("btn-reset-passive");
     if (btnResetPassive) {
       btnResetPassive.addEventListener("click", () => this.resetPassives());
@@ -556,13 +570,14 @@ export class UIController {
       return;
     }
 
-    const drawer = document.getElementById("utility-drawer");
+    const centerPanels = document.getElementById("center-panels");
     const activeButton = document.querySelector<HTMLElement>(".nav-icon.active");
-    const isDrawerOpen = drawer?.style.display === "block";
+    const isCenterOpen = centerPanels?.classList.contains("is-open");
     const isSamePanel = activeButton?.dataset.panel === panel;
 
-    if (isDrawerOpen && isSamePanel && panel !== "map" && panel !== "passive") {
-      this.closeUtilityPanel();
+    // Toggle off if clicking same panel (except map/passive which always open)
+    if (isCenterOpen && isSamePanel && panel !== "map" && panel !== "passive") {
+      this.closeCenterPanel();
       return;
     }
 
@@ -571,23 +586,21 @@ export class UIController {
         this.addLog("战斗中无法打开地图仪");
         return;
       }
-      this.closeUtilityPanel();
+      this.closeCenterPanel();
       this.setNavActive("map");
       this.openMapDevice();
       return;
     }
     if (panel === "passive") {
-      this.closeUtilityPanel();
-      this.setNavActive("passive");
       this.openPassiveTree();
       return;
     }
     if (panel === "save") {
-      this.showUtilityPanel("save");
+      this.showCenterPanel("save");
       this.showSaveMenu();
       return;
     }
-    this.showUtilityPanel(panel as UtilityPanel);
+    this.showCenterPanel(panel as UtilityPanel);
   }
 
   private setNavActive(panel: UtilityPanel | "map" | "passive") {
@@ -596,33 +609,36 @@ export class UIController {
     });
   }
 
-  private showUtilityPanel(panel: UtilityPanel) {
-    const drawer = document.getElementById("utility-drawer");
-    if (!drawer) return;
-
-    const titleMap: Record<UtilityPanel, string> = {
-      character: "角色属性",
-      equipment: "装备",
-      skills: "技能组",
-      inventory: "背包",
-      stash: "仓库",
-      quests: "任务",
-      log: "战斗日志",
-      save: "存档管理",
-    };
-    const title = document.getElementById("drawer-title");
-    if (title) title.textContent = titleMap[panel] || "信息面板";
+  private showCenterPanel(panel: UtilityPanel) {
+    const centerPanels = document.getElementById("center-panels");
+    const centerPanel = document.getElementById("center-panel");
+    if (!centerPanels) return;
 
     this.setNavActive(panel);
-    document.querySelectorAll("[data-panel-content]").forEach((section) => {
-      section.classList.toggle("is-active", (section as HTMLElement).dataset.panelContent === panel);
+    // 背包/仓库共用一个存储中心区块。
+    const sectionPanel = panel === "stash" ? "inventory" : panel;
+    document.querySelectorAll(".center-section[data-panel-content]").forEach((section) => {
+      section.classList.toggle("is-active", (section as HTMLElement).dataset.panelContent === sectionPanel);
     });
-    drawer.style.display = "block";
+    centerPanels.classList.add("is-open");
+    if (centerPanel) centerPanel.classList.add("panels-open");
+    if (panel === "inventory" || panel === "stash") {
+      this.updateStorageUI();
+    }
   }
 
-  private closeUtilityPanel() {
-    const drawer = document.getElementById("utility-drawer");
-    if (drawer) drawer.style.display = "none";
+  /** 渲染存储中心：左仓库格子 + 中合成台 + 右背包，全部同屏显示。 */
+  private updateStorageUI() {
+    this.updateStashUI();
+    this.showCraftingTable();
+    this.updateInventoryUI();
+  }
+
+  private closeCenterPanel() {
+    const centerPanels = document.getElementById("center-panels");
+    const centerPanel = document.getElementById("center-panel");
+    if (centerPanels) centerPanels.classList.remove("is-open");
+    if (centerPanel) centerPanel.classList.remove("panels-open");
     document.querySelectorAll(".nav-icon").forEach((button) => button.classList.remove("active"));
   }
 
@@ -821,20 +837,21 @@ export class UIController {
       this.addLog("战斗中无法打开天赋树");
       return;
     }
-    const modal = document.getElementById("passive-modal");
-    if (modal) {
-      modal.style.display = "flex";
-      this.passiveTreeUI.setAllocatedNodes(this.state.player.allocatedNodes);
-      this.updatePassivePointsDisplay();
-    }
+    this.closeCenterPanel();
+    this.setNavActive("passive");
+    this.setMainView("passive");
+    this.passiveTreeUI.setAllocatedNodes(this.state.player.allocatedNodes);
+    this.updatePassivePointsDisplay();
+    // View is now visible — resize canvas next frame so rect is non-zero
+    requestAnimationFrame(() => {
+      this.passiveTreeUI.resizeCanvas();
+      this.passiveTreeUI.centerTree();
+    });
   }
   
   private closePassiveTree() {
-    const modal = document.getElementById("passive-modal");
-    if (modal) {
-      modal.style.display = "none";
-    }
-    if (this.getMainView() !== "map-device") this.setNavActive("character");
+    this.setMainView("zone-select");
+    this.setNavActive("character");
   }
   
   private onPassiveAllocate(nodeId: string) {
@@ -845,12 +862,19 @@ export class UIController {
       this.updatePassivePointsDisplay();
       this.addLog(`分配天赋: ${nodeId}`);
       this.autoSave();
+    } else {
+      // PassiveTreeUI updates its local selection before invoking this callback.
+      this.passiveTreeUI.setAllocatedNodes(this.state.player.allocatedNodes);
+      this.addLog("没有可用的天赋点");
     }
   }
   
   private onPassiveDeallocate(nodeId: string) {
-    this.state.player.passivePoints++;
-    this.state.player.allocatedNodes = this.passiveTreeUI.getAllocatedNodes();
+    const previousNodes = this.state.player.allocatedNodes;
+    const nextNodes = this.passiveTreeUI.getAllocatedNodes();
+    const removedCount = previousNodes.filter((id) => !nextNodes.includes(id)).length;
+    this.state.player.passivePoints += Math.max(1, removedCount);
+    this.state.player.allocatedNodes = nextNodes;
     this.recalculatePassiveStats();
     this.updatePassivePointsDisplay();
     this.addLog(`取消天赋: ${nodeId}`);
@@ -948,7 +972,10 @@ export class UIController {
   }
   
   private leaveZone() {
-    this.zoneSystem.completeZone();
+    if (!this.zoneSystem.completeZone()) {
+      this.addLog("需要先完成一次探索遭遇，才能离开区域");
+      return;
+    }
     
     // 检查任务完成并通知
     const pendingQuests = this.zoneSystem.getPendingRewardQuests();
@@ -984,13 +1011,16 @@ export class UIController {
     }
 
     const result = this.zoneSystem.explore();
-    this.applyExplorationRewards(result);
+    // Combat rewards are held until victory; non-combat events can resolve immediately.
+    if (!result.monsters || result.monsters.length === 0) {
+      this.applyExplorationRewards(result);
+    }
     this.displayExplorationResult(result);
     
     if (result.monsters && result.monsters.length > 0) {
       this.pendingCombatRewards = result.rewards;
       setTimeout(() => {
-        if (!this.state.inCombat) this.startCombat(result.monsters!);
+        if (!this.state.inCombat)        this.startCombat(result.monsters!);
       }, 1000);
     }
     
@@ -1009,6 +1039,7 @@ export class UIController {
     // 更新UI
     this.updateStatusBars();
     this.updateInventoryUI();
+    this.updateStashUI();
     this.updateQuestUI();
     this.autoSave();
   }
@@ -1152,6 +1183,7 @@ export class UIController {
         this.completeMapRun();
       } else {
         this.applyCombatRewards(this.pendingCombatRewards || [], this.pendingCombatRewards?.find((reward) => reward.type === "experience")?.amount || 0);
+        this.zoneSystem.markCurrentZoneResolved();
       }
       this.pendingCombatRewards = null;
       if (wasMapCombat) {
@@ -1296,12 +1328,14 @@ export class UIController {
     this.updateSkillUI();
     this.updateFlaskUI();
     this.updateInventoryUI();
+    this.updateStashUI();
     this.updateQuestUI();
+    this.rightPanel.update();
     this.bindTooltips();
   }
 
   private bindTooltips(root: ParentNode = document) {
-    root.querySelectorAll<HTMLElement>("[data-tooltip-item-id], [data-tooltip-map-id], [data-tooltip-gem-id], [data-tooltip-currency-id]").forEach((element) => {
+    root.querySelectorAll<HTMLElement>("[data-tooltip-item-id], [data-tooltip-map-id], [data-tooltip-gem-id], [data-tooltip-currency-id], [data-tooltip-flask-index]").forEach((element) => {
       element.addEventListener("mouseenter", () => this.showTooltip(element));
       element.addEventListener("mouseleave", () => this.hideTooltip());
       element.addEventListener("mousemove", (event) => this.moveTooltip(event));
@@ -1314,11 +1348,12 @@ export class UIController {
     const mapId = element.dataset.tooltipMapId;
     const gemId = element.dataset.tooltipGemId;
     const currencyId = element.dataset.tooltipCurrencyId;
+    const flaskIndex = element.dataset.tooltipFlaskIndex;
     let title = "详情";
     let body = "";
     let className = "tooltip-panel";
     if (itemId) {
-      const item = [...Object.values(this.state.player.equipment), ...this.state.player.inventory.items].find(candidate => candidate?.id === itemId);
+      const item = [...Object.values(this.state.player.equipment), ...this.state.player.inventory.items, ...this.getStash().items].find(candidate => candidate?.id === itemId);
       if (item) { title = item.name; body = formatItem(item); className += ` rarity-${item.rarity}`; }
     } else if (mapId) {
       const map = this.mapDevice.getMapList().find(candidate => candidate.id === mapId);
@@ -1326,10 +1361,18 @@ export class UIController {
     } else if (gemId) {
       const gem = getGemById(gemId);
       const owned = this.state.player.inventory.gems.find(candidate => candidate.id === gemId);
-      if (gem) { title = `${gem.name} · Lv.${owned?.level || gem.requiredLevel}`; body = [gem.type === GemType.Active ? "主动技能宝石" : "辅助宝石", `需求等级：${gem.requiredLevel}`, gem.description, gem.active ? `标签：${gem.active.tags.join("、")}` : gem.support ? `支持标签：${gem.support.addedTags?.join("、") || "通用"}` : ""].filter(Boolean).join("\n"); }
+      if (gem) { title = `${gem.name} · Lv.${owned?.level || gem.requiredLevel}`; body = [gem.type === GemType.Active ? "主动技能宝石" : "辅助宝石", `需求等级：${gem.requiredLevel}`, gem.description, gem.active ? `标签：${gem.active.tags.join("、")}` : gem.support ? `支持条件：${getSupportRequirementLabel(gem.id) || "通用"}` : "", `数据：PoB ${gem.dataSource?.gameVersion || "3.29.1"}`].filter(Boolean).join("\n"); }
     } else if (currencyId) {
       const currency = getCurrencyById(currencyId);
       if (currency) { title = currency.name; body = currency.description; }
+    } else if (flaskIndex !== undefined) {
+      const flask = this.state.player.flasks[parseInt(flaskIndex)];
+      if (flask) {
+        const typeLabel = getFlaskTypeLabel(flask.type);
+        const effectLabel = flask.effect.type === "utility" ? getUtilityLabel(flask.effect.utility) : typeLabel;
+        title = flask.name;
+        body = [flask.description, `类型：${typeLabel}`, `效果：${effectLabel}`, `充能：${flask.charges} / ${flask.maxCharges}`, `消耗：${flask.chargesPerUse} / 次`].join("\n");
+      }
     }
     if (!body) return;
     const tooltip = document.createElement("div");
@@ -1359,21 +1402,15 @@ export class UIController {
     const logContent = document.getElementById("log-content");
     if (!logContent) return;
     
-    // 查找或创建任务面板（在日志区域之前插入）
+    // 查找任务面板
     let questPanel = document.getElementById("quest-panel");
     if (!questPanel) {
-      questPanel = document.createElement("div");
+      questPanel = document.createElement("section");
       questPanel.id = "quest-panel";
-      questPanel.className = "panel";
-      const utilityContent = document.getElementById("utility-panel-content");
-      if (utilityContent) {
-        utilityContent.appendChild(questPanel);
-      } else {
-        const logPanel = document.getElementById("log-panel");
-        if (logPanel && logPanel.parentNode) {
-          logPanel.parentNode.insertBefore(questPanel, logPanel);
-        }
-      }
+      questPanel.className = "center-section";
+      questPanel.setAttribute("data-panel-content", "quests");
+      const centerPanels = document.getElementById("center-panels");
+      if (centerPanels) centerPanels.appendChild(questPanel);
     }
     
     const pendingQuests = this.zoneSystem.getPendingRewardQuests();
@@ -1541,7 +1578,7 @@ export class UIController {
 
   private updateEquipmentUI() {
     const player = this.state.player;
-    const equipmentPanel = document.querySelector<HTMLElement>('[data-panel-content="equipment"]');
+    const equipmentPanel = document.querySelector<HTMLElement>('.center-section[data-panel-content="equipment"]');
     if (!equipmentPanel) return;
     
     for (const slot of Object.values(EquipSlot)) {
@@ -1569,16 +1606,12 @@ export class UIController {
     }
     container.innerHTML = this.state.player.flasks.slice(0, FLASK_SLOT_COUNT).map((flask, index) => {
       if (!flask) {
-        return `<button class="flask-slot empty" data-flask-slot="${index}" title="空药剂槽"><span class="flask-key">${index + 4}</span><span class="flask-icon">+</span><span class="flask-name">空</span></button>`;
+        return `<button class="flask-slot empty" data-flask-slot="${index}" title="空药剂槽"><span class="flask-key">${index + 4}</span><span class="flask-icon">+</span></button>`;
       }
       const ready = flask.charges >= flask.chargesPerUse;
-      const typeLabel = getFlaskTypeLabel(flask.type);
-      const effectLabel = flask.effect.type === "utility" ? getUtilityLabel(flask.effect.utility) : typeLabel;
-      return `<button class="flask-slot flask-${flask.type}${ready ? " ready" : ""}" data-flask-slot="${index}" title="${flask.description}">
+      return `<button class="flask-slot flask-${flask.type}${ready ? " ready" : ""}" data-flask-slot="${index}" data-tooltip-flask-index="${index}">
         <span class="flask-key">${index + 4}</span>
         <span class="flask-icon">${flask.type === "life" ? "♥" : flask.type === "mana" ? "◆" : "✦"}</span>
-        <span class="flask-info"><span class="flask-name">${flask.name}</span><span class="flask-effect">${effectLabel}</span></span>
-        <span class="flask-charges">${flask.charges}/${flask.maxCharges}</span>
       </button>`;
     }).join("");
   }
@@ -1589,18 +1622,64 @@ export class UIController {
       this.addLog("该技能栏为空，请先镶嵌主动技能宝石");
       return;
     }
-    const available = this.state.player.inventory.gems;
-    const supports = available.filter(gem => gem.type === GemType.Support);
+    const player = this.state.player;
+    const available = [...player.inventory.gems, ...group.supportGems]
+      .filter((gem, position, gems) => gems.findIndex(candidate => candidate.id === gem.id) === position);
+    const supports = available.filter(gem => gem.type === GemType.Support && gem.requiredLevel <= player.level);
+    
+    // 计算当前配置的 DPS
+    const currentComputed = computeSkillGroup(group);
+    const currentDps = estimateDps(currentComputed, player.offense.critChance, player.offense.critMultiplier, player.offense.attackSpeed);
+    
     const modal = document.createElement("div");
     modal.className = "build-config-modal";
     modal.innerHTML = `<div class="build-config-content">
-      <h3>配置技能栏 ${index + 1}：${group.activeGem.name}</h3>
-      <p class="build-config-hint">右键技能栏打开配置；辅助宝石必须与主动宝石处于同一链接组。</p>
-      <div class="build-support-list">${supports.length ? supports.map(gem => `<label><input type="checkbox" data-gem-id="${gem.id}" ${group.supportGems.some(current => current.id === gem.id) ? "checked" : ""}> ${gem.name} Lv.${gem.level}</label>`).join("") : "暂无可用辅助宝石"}</div>
+      <h3>配置技能栏 ${index + 1}：${group.activeGem.name} <span style="color:var(--accent-color)">Lv.${group.activeGem.level}</span></h3>
+      <p class="build-config-hint">选择辅助宝石来强化技能；辅助宝石等级影响加成效果。</p>
+      
+      <div class="build-dps-preview">
+        <div class="dps-label">当前 DPS 估算</div>
+        <div class="dps-value">≈${currentDps}</div>
+        <div class="dps-breakdown">
+          <span>伤害: ${currentComputed.totalDamage}</span>
+          <span>倍率: ${(currentComputed.multiplier * 100).toFixed(0)}%</span>
+          <span>暴击: ${player.offense.critChance + currentComputed.critChanceBonus}%</span>
+          <span>穿透: ${currentComputed.firePenetration || currentComputed.coldPenetration || currentComputed.lightningPenetration || 0}%</span>
+        </div>
+      </div>
+      
+      <div class="build-support-list">${supports.length ? supports.map(gem => {
+        const isActive = group.supportGems.some(current => current.id === gem.id);
+        return `<label class="support-gem-option ${isActive ? "active" : ""}">
+          <input type="checkbox" data-gem-id="${gem.id}" ${isActive ? "checked" : ""} ${!isActive && !canSupportSkill(group.activeGem.id, gem.id, group.supportGems.map(current => current.id)) ? "disabled" : ""}>
+          <span class="support-gem-info">
+            <span class="support-gem-name gem-${gem.color}">${gem.name}</span>
+            <span class="support-gem-level">Lv.${gem.level}</span>
+          </span>
+          <span class="support-gem-desc">${getGemById(gem.id)?.description || ""} · 条件：${getSupportRequirementLabel(gem.id) || "通用"}${canSupportSkill(group.activeGem.id, gem.id, group.supportGems.map(current => current.id)) ? "" : "（当前技能不适用）"}</span>
+        </label>`;
+      }).join("") : "暂无可用辅助宝石"}</div>
       <div class="build-config-actions"><button class="build-config-save">保存</button><button class="build-config-cancel">取消</button></div>
     </div>`;
+    
+    // 实时预览 DPS 变化
+    const checkboxes = modal.querySelectorAll<HTMLInputElement>("input[data-gem-id]");
+    checkboxes.forEach(checkbox => {
+      checkbox.addEventListener("change", () => {
+        // 临时计算新 DPS
+        const checked = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.dataset.gemId!);
+        const tempGroup = { ...group, supportGems: checked.map(id => this.toPlayerGem(getGemById(id)!)) };
+        const tempComputed = computeSkillGroup(tempGroup);
+        const tempDps = estimateDps(tempComputed, player.offense.critChance, player.offense.critMultiplier, player.offense.attackSpeed);
+        const dpsEl = modal.querySelector(".dps-value");
+        if (dpsEl) dpsEl.textContent = `≈${tempDps}`;
+        const breakdown = modal.querySelector(".dps-breakdown");
+        if (breakdown) breakdown.innerHTML = `<span>伤害: ${tempComputed.totalDamage}</span><span>倍率: ${(tempComputed.multiplier * 100).toFixed(0)}%</span><span>暴击: ${player.offense.critChance + tempComputed.critChanceBonus}%</span><span>穿透: ${tempComputed.firePenetration || tempComputed.coldPenetration || tempComputed.lightningPenetration || 0}%</span>`;
+      });
+    });
+    
     modal.querySelector(".build-config-save")?.addEventListener("click", () => {
-      const selected = Array.from(modal.querySelectorAll<HTMLInputElement>("input[data-gem-id]:checked")).map(input => input.dataset.gemId!).slice(0, 5);
+      const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.dataset.gemId!).slice(0, 5);
       group.supportGems = selected.map(id => this.toPlayerGem(getGemById(id)!));
       this.updateSkillUI();
       this.addLog(`已更新 ${group.activeGem.name} 的辅助宝石配置`);
@@ -1626,8 +1705,17 @@ export class UIController {
       const groups = payload.skillGroups.filter((group: any) => group?.activeGem?.id).map((group: any) => {
         const active = getGemById(group.activeGem.id);
         if (!active || active.type !== GemType.Active) return null;
-        const supports = Array.isArray(group.supportGems) ? group.supportGems.map((gem: any) => getGemById(gem.id)).filter((gem: GemData | undefined): gem is GemData => !!gem && gem.type === GemType.Support) : [];
-        return { id: `imported_skill_${Date.now()}_${active.id}`, name: active.name, activeGem: this.toPlayerGem(active), supportGems: supports.slice(0, 5).map(gem => this.toPlayerGem(gem)) };
+        const activeGem = this.toPlayerGem(active);
+        // 保留导入数据中的宝石等级（不低于1级）
+        if (group.activeGem?.level) activeGem.level = Math.max(1, Math.min(20, group.activeGem.level));
+        const supports = Array.isArray(group.supportGems) ? group.supportGems.map((gem: any) => {
+          const gemData = getGemById(gem.id);
+          if (!gemData || gemData.type !== GemType.Support) return null;
+          const playerGem = this.toPlayerGem(gemData);
+          if (gem.level) playerGem.level = Math.max(1, Math.min(20, gem.level));
+          return playerGem;
+        }).filter((gem: Gem | null): gem is Gem => gem !== null) : [];
+        return { id: `imported_skill_${Date.now()}_${active.id}`, name: active.name, activeGem, supportGems: supports.slice(0, 5) };
       }).filter(Boolean) as SkillGroup[];
       this.state.player.skillGroups = groups.slice(0, 3);
       this.updateSkillUI();
@@ -1640,7 +1728,7 @@ export class UIController {
 
   private updateSkillUI() {
     const player = this.state.player;
-    const skillsPanel = document.querySelector<HTMLElement>('[data-panel-content="skills"]');
+    const skillsPanel = document.querySelector<HTMLElement>('.center-section[data-panel-content="skills"]');
     if (!skillsPanel) return;
     
     for (let i = 0; i < 3; i++) {
@@ -1650,9 +1738,19 @@ export class UIController {
       const skillGroup = player.skillGroups[i];
       if (skillGroup) {
         const computed = computeSkillGroup(skillGroup);
+        const dps = estimateDps(computed, player.offense.critChance, player.offense.critMultiplier, player.offense.attackSpeed);
         slotElement.className = `skill-content gem-${skillGroup.activeGem.color}`;
         const supports = skillGroup.supportGems.length ? ` + ${skillGroup.supportGems.map(gem => gem.name).join(" + ")}` : "";
-        slotElement.innerHTML = `<strong>${skillGroup.activeGem.name}</strong><span class="skill-supports">${supports}</span><span class="skill-stats">${computed.totalDamage}伤害 · ${computed.manaCost}魔力</span>`;
+        const penInfo = computed.firePenetration > 0 ? ` 🔥${computed.firePenetration}%穿` :
+          computed.coldPenetration > 0 ? ` ❄️${computed.coldPenetration}%穿` :
+          computed.lightningPenetration > 0 ? ` ⚡${computed.lightningPenetration}%穿` : "";
+        const critInfo = computed.critChanceBonus > 0 ? ` +${computed.critChanceBonus}%暴` : "";
+        slotElement.innerHTML = `
+          <strong>${skillGroup.activeGem.name} Lv.${skillGroup.activeGem.level}</strong>
+          <span class="skill-supports">${supports}</span>
+          <span class="skill-stats">${computed.totalDamage}伤 · ${computed.manaCost}魔${penInfo}${critInfo}</span>
+          <span class="skill-dps">≈${dps} DPS</span>
+        `;
       } else {
         slotElement.textContent = "-";
         slotElement.className = "skill-content empty";
@@ -1676,69 +1774,89 @@ export class UIController {
     }
   }
 
+  /** 存储中心右栏：背包装备 / 通货 / 宝石 同屏展示，无需翻页。 */
   private updateInventoryUI() {
     const player = this.state.player;
     const content = document.getElementById("inventory-content");
     if (!content) return;
-    
-    let html = "";
-    
-    if (this.state.currentTab === "items") {
-      if (player.inventory.items.length === 0) {
-        html = '<div class="inventory-empty">暂无物品</div>';
-      } else {
-        for (const item of player.inventory.items) {
-          html += `
-            <div class="inventory-item rarity-${item.rarity}" data-item-id="${item.id}" data-tooltip-item-id="${item.id}">
-              <span class="item-name">${item.name}</span>
-              <span class="item-level">Lv.${item.itemLevel}${this.getItemComparisonLabel(item)}</span>
-            </div>
-          `;
-        }
-      }
-    } else if (this.state.currentTab === "currency") {
-      if (player.inventory.currencies.size === 0) {
-        html = '<div class="inventory-empty">暂无通货</div>';
-      } else {
-        player.inventory.currencies.forEach((count, id) => {
-          const currency = getCurrencyById(id);
-          if (currency && count > 0) {
-            html += `
-              <div class="inventory-currency" data-currency-id="${id}" data-tooltip-currency-id="${id}">
-                <span class="currency-name">${currency.name}</span>
-                <span class="currency-count">×${count}</span>
-              </div>
-            `;
-          }
-        });
-      }
-    } else if (this.state.currentTab === "gems") {
-      if (player.inventory.gems.length === 0) {
-        html = '<div class="inventory-empty">暂无技能宝石</div>';
-      } else {
-        for (const gem of player.inventory.gems) {
-          const gemData = getGemById(gem.id);
-          if (!gemData) continue;
-          html += `
-            <div class="inventory-gem gem-${gem.color}" data-gem-id="${gem.id}" data-tooltip-gem-id="${gem.id}">
-              <span class="gem-name">${gemData.name}</span>
-              <span class="gem-level">${gem.type === GemType.Active ? "主动" : "辅助"} Lv.${gem.level} / 需求 Lv.${gem.requiredLevel}</span>
-              <span class="gem-progress">经验 ${getGemProgress(gem).current}/${getGemProgress(gem).required} · ${getGemProgress(gem).percent}%</span>
-              <span class="gem-description">${gemData.description}</span>
-            </div>
-          `;
-        }
+
+    // 装备
+    let itemsHtml = "";
+    if (player.inventory.items.length === 0) {
+      itemsHtml = '<div class="inventory-empty">暂无装备</div>';
+    } else {
+      for (const item of player.inventory.items) {
+        itemsHtml += `
+          <div class="inventory-item rarity-${item.rarity}" data-item-id="${item.id}" data-tooltip-item-id="${item.id}">
+            <span class="item-name">${item.name}</span>
+            <span class="item-level">Lv.${item.itemLevel}${this.getItemComparisonLabel(item)}</span>
+          </div>
+        `;
       }
     }
-    
-    content.innerHTML = html;
+
+    // 通货
+    let currencyHtml = "";
+    if (player.inventory.currencies.size === 0) {
+      currencyHtml = '<div class="inventory-empty">暂无通货</div>';
+    } else {
+      player.inventory.currencies.forEach((count, id) => {
+        const currency = getCurrencyById(id);
+        if (currency && count > 0) {
+          currencyHtml += `
+            <div class="inventory-currency" data-currency-id="${id}" data-tooltip-currency-id="${id}">
+              <span class="currency-name">${currency.name}</span>
+              <span class="currency-count">×${count}</span>
+            </div>
+          `;
+        }
+      });
+    }
+
+    // 宝石
+    let gemsHtml = "";
+    if (player.inventory.gems.length === 0) {
+      gemsHtml = '<div class="inventory-empty">暂无宝石</div>';
+    } else {
+      for (const gem of player.inventory.gems) {
+        const gemData = getGemById(gem.id);
+        if (!gemData) continue;
+        gemsHtml += `
+          <div class="inventory-gem gem-${gem.color}" data-gem-id="${gem.id}" data-tooltip-gem-id="${gem.id}" title="${gemData.name}">
+            <span class="gem-dot gem-${gem.color}"></span>
+          </div>
+        `;
+      }
+    }
+
+    content.innerHTML = `
+      <div class="backpack-section">
+        <div class="backpack-section-title">装备</div>
+        <div class="backpack-items">${itemsHtml}</div>
+      </div>
+      <div class="backpack-section">
+        <div class="backpack-section-title">通货</div>
+        <div class="backpack-currencies">${currencyHtml}</div>
+      </div>
+      <div class="backpack-section">
+        <div class="backpack-section-title">宝石</div>
+        <div class="backpack-gems">${gemsHtml}</div>
+      </div>
+    `;
     this.bindTooltips(content);
-    
-    // 绑定点击事件
-    content.querySelectorAll(".inventory-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        const itemId = (el as HTMLElement).dataset.itemId;
-        const item = player.inventory.items.find((candidate) => candidate.id === itemId);
+
+    // 装备：可拖拽到仓库，点击查看详情
+    content.querySelectorAll<HTMLElement>(".inventory-item").forEach((element) => {
+      element.draggable = true;
+      element.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", JSON.stringify({ source: "inventory", itemId: element.dataset.itemId }));
+      });
+      element.addEventListener("dblclick", () => {
+        const itemId = element.dataset.itemId;
+        if (itemId) this.selectCraftingTarget(itemId);
+      });
+      element.addEventListener("click", () => {
+        const item = player.inventory.items.find((candidate) => candidate.id === element.dataset.itemId);
         if (item) this.showItemDetails(item, false);
       });
     });
@@ -1750,7 +1868,7 @@ export class UIController {
         if (gem) this.addLog(`${gem.name}：${gem.description}`);
       });
     });
-    
+
     content.querySelectorAll(".inventory-currency").forEach((el) => {
       el.addEventListener("click", () => {
         const currencyId = (el as HTMLElement).dataset.currencyId;
@@ -1759,18 +1877,160 @@ export class UIController {
     });
   }
   
+  private getStash(): NonNullable<Player["inventory"]["stash"]> {
+    if (!this.state.player.inventory.stash) {
+      this.state.player.inventory.stash = { items: [], gems: [], currencies: new Map(), maxSlots: 60 };
+    }
+    return this.state.player.inventory.stash;
+  }
+
+  private getCraftingTarget(): { item: Item; container: Item[] } | null {
+    if (!this.craftingTargetId) return null;
+    const inventoryItem = this.state.player.inventory.items.find(item => item.id === this.craftingTargetId);
+    if (inventoryItem) return { item: inventoryItem, container: this.state.player.inventory.items };
+    const stash = this.getStash();
+    const stashItem = stash.items.find(item => item.id === this.craftingTargetId);
+    if (stashItem) return { item: stashItem, container: stash.items };
+    this.craftingTargetId = null;
+    return null;
+  }
+
+  private selectCraftingTarget(itemId: string) {
+    const inventoryItem = this.state.player.inventory.items.find(item => item.id === itemId);
+    const stashItem = this.getStash().items.find(item => item.id === itemId);
+    const item = inventoryItem || stashItem;
+    if (!item) return;
+    this.craftingTargetId = item.id;
+    this.addLog(`合成目标：${item.name}`);
+    this.showCraftingTable();
+  }
+
+  private showCraftingTable() {
+    const table = document.getElementById("craft-table");
+    if (!table) return;
+    const target = this.getCraftingTarget();
+    const targetMarkup = target
+      ? `<strong class="crafting-target-name rarity-${target.item.rarity}">${target.item.name}</strong><span class="crafting-target-meta">${target.item.rarity === Rarity.Rare ? "可用混沌石重铸" : "需要稀有装备"}</span>`
+      : "拖入或双击装备以选择目标";
+    table.innerHTML = `<div class="crafting-table"><div class="crafting-slot" id="craft-target" data-craft-target="true">${targetMarkup}</div><div class="crafting-arrow">＋</div><div class="crafting-result" id="craft-result">${target ? "重铸结果将在目标上显示" : "合成结果"}</div><button class="small-btn" id="btn-craft">使用通货合成</button><p>混沌石：仅能重铸稀有装备的词缀。</p></div>`;
+    const craftTarget = table.querySelector<HTMLElement>("#craft-target");
+    if (craftTarget) {
+      craftTarget.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        craftTarget.classList.add("drop-target");
+      });
+      craftTarget.addEventListener("dragleave", () => craftTarget.classList.remove("drop-target"));
+      craftTarget.addEventListener("drop", (event) => {
+        event.preventDefault();
+        craftTarget.classList.remove("drop-target");
+        try {
+          const payload = JSON.parse(event.dataTransfer?.getData("text/plain") || "") as { source?: string; itemId?: string };
+          if ((payload.source === "inventory" || payload.source === "stash") && payload.itemId) {
+            this.selectCraftingTarget(payload.itemId);
+          }
+        } catch { /* ignore malformed drag payloads */ }
+      });
+    }
+    table.querySelector("#btn-craft")?.addEventListener("click", () => this.craftSelectedItem());
+  }
+
+  private craftSelectedItem() {
+    const targetState = this.getCraftingTarget();
+    const count = this.state.player.inventory.currencies.get("chaos_orb") || 0;
+    if (!targetState) { this.addLog("请先放入要合成的装备"); return; }
+    if (targetState.item.rarity !== Rarity.Rare) { this.addLog("混沌石只能重铸稀有装备"); return; }
+    if (count < 1) { this.addLog("需要 1 个混沌石"); return; }
+
+    const previousName = targetState.item.name;
+    const result = applyCurrency(targetState.item, "reforge_rare");
+    const index = targetState.container.findIndex(item => item.id === targetState.item.id);
+    if (index < 0) return;
+    targetState.container[index] = result;
+    this.state.player.inventory.currencies.set("chaos_orb", count - 1);
+    this.addLog(`合成完成：${previousName} 的词缀已重铸`);
+    this.updateAllUI();
+    this.showCraftingTable();
+    this.autoSave();
+  }
+
+  private updateStashUI() {
+    const grid = document.getElementById("stash-grid");
+    const capacity = document.querySelector(".stash-capacity");
+    if (!grid) return;
+    const stash = this.getStash();
+    const items = stash.items;
+    if (capacity) capacity.textContent = `${items.length} / ${stash.maxSlots}`;
+    let html = "";
+    for (let index = 0; index < stash.maxSlots; index++) {
+      const item = items[index];
+      html += item
+        ? `<div class="stash-cell filled rarity-${item.rarity}" draggable="true" data-stash-item-id="${item.id}" data-tooltip-item-id="${item.id}"><span>★</span><small>${item.name}</small></div>`
+        : `<div class="stash-cell" data-stash-empty="true"><span>＋</span></div>`;
+    }
+    grid.innerHTML = html;
+    this.bindTooltips(grid);
+    grid.querySelectorAll<HTMLElement>("[data-stash-item-id]").forEach((cell) => {
+      cell.addEventListener("dblclick", () => {
+        const itemId = cell.dataset.stashItemId;
+        if (itemId) this.selectCraftingTarget(itemId);
+      });
+      cell.addEventListener("click", () => {
+        const item = stash.items.find(candidate => candidate.id === cell.dataset.stashItemId);
+        if (item) this.showItemDetails(item, false);
+      });
+      cell.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", JSON.stringify({ source: "stash", itemId: cell.dataset.stashItemId }));
+      });
+    });
+    grid.querySelectorAll<HTMLElement>("[data-stash-empty]").forEach((cell) => {
+      cell.addEventListener("dragover", (event) => { event.preventDefault(); cell.classList.add("drop-target"); });
+      cell.addEventListener("dragleave", () => cell.classList.remove("drop-target"));
+      cell.addEventListener("drop", (event) => {
+        event.preventDefault();
+        cell.classList.remove("drop-target");
+        this.handleStorageDrop(event.dataTransfer?.getData("text/plain") || "");
+      });
+    });
+  }
+
+  private handleStorageDrop(payload: string) {
+    try {
+      const data = JSON.parse(payload) as { source?: "inventory" | "stash"; itemId?: string };
+      if (!data.itemId || (data.source !== "inventory" && data.source !== "stash")) return;
+      const stash = this.getStash();
+      if (data.source === "inventory") {
+        const index = this.state.player.inventory.items.findIndex(item => item.id === data.itemId);
+        if (index < 0 || stash.items.length >= stash.maxSlots) return;
+        stash.items.push(this.state.player.inventory.items.splice(index, 1)[0]);
+        this.addLog("物品已存入仓库");
+      } else {
+        const index = stash.items.findIndex(item => item.id === data.itemId);
+        if (index < 0 || this.state.player.inventory.items.length >= this.state.player.inventory.maxSlots) return;
+        this.state.player.inventory.items.push(stash.items.splice(index, 1)[0]);
+        this.addLog("物品已取回背包");
+      }
+      this.updateInventoryUI();
+      this.updateStashUI();
+      this.autoSave();
+    } catch { /* ignore malformed drag payloads */ }
+  }
+
   private getItemComparisonLabel(item: Item): string {
     const equipped = this.state.player.equipment[item.slot];
-    if (!equipped) return " · 新槽位";
-    const score = (candidate: Item): number => {
-      const stats = calculateItemStats(candidate);
-      return Object.entries(stats).reduce((total, [key, value]) => {
-        const weight = key.toLowerCase().includes("resistance") ? 2 : key.toLowerCase().includes("damage") ? 2 : 1;
-        return total + value * weight;
-      }, candidate.itemLevel + candidate.quality);
-    };
-    const delta = score(item) - score(equipped);
-    return delta > 8 ? " · ↑推荐" : delta < -8 ? " · ↓较弱" : " · ≈可比较";
+    if (!equipped) return " · <span style='color:#60a5fa'>新槽位</span>";
+    const stats = calculateItemStats(item);
+    const equippedStats = calculateItemStats(equipped);
+    const allKeys = new Set([...Object.keys(stats), ...Object.keys(equippedStats)]);
+    let better = 0, worse = 0;
+    for (const key of allKeys) {
+      const nv = stats[key] ?? 0;
+      const ev = equippedStats[key] ?? 0;
+      if (nv > ev) better++;
+      else if (nv < ev) worse++;
+    }
+    if (better > worse + 1) return " · <span style='color:#22c55e'>↑推荐</span>";
+    if (worse > better + 1) return " · <span style='color:#ef4444'>↓较弱</span>";
+    return " · <span style='color:#a3a3a3'>≈可比</span>";
   }
 
   private updateCombatUI() {
@@ -1780,15 +2040,35 @@ export class UIController {
     const monsterStatus = this.state.combat.getMonsterStatus();
     const combatTitle = document.querySelector("#combat-display .panel-title");
     if (combatTitle) combatTitle.textContent = `⚔️ 战斗 · 第${this.combatTurnNumber}回合`;
+    
+    // 冰冻提示
+    const playerStatus = this.state.combat.getPlayerStatus();
+    const isPlayerFrozen = playerStatus.statusEffects.some((e) => e.type === "freeze" && e.duration > 0);
     const actionBar = document.getElementById("action-bar");
-    if (actionBar) actionBar.innerHTML = `<span class="action-slot active">你的回合结束后敌人将行动</span><span class="action-slot enemy">敌人 ${monsterStatus.filter(m => !m.isDead).length}/${monsterStatus.length}</span>`;
+    if (actionBar) {
+      let barHtml = `<span class="action-slot active">你的回合结束后敌人将行动</span><span class="action-slot enemy">敌人 ${monsterStatus.filter(m => !m.isDead).length}/${monsterStatus.length}</span>`;
+      if (isPlayerFrozen) {
+        barHtml = `<span class="action-slot frozen">❄️ 冰冻中 — 无法行动</span>`;
+      }
+      actionBar.innerHTML = barHtml;
+    }
     const enemiesContainer = document.getElementById("enemies");
     if (!enemiesContainer) return;
     
+    // 构建敌人行（含异常状态图标）
     let html = "";
     for (const monster of monsterStatus) {
       const hpPercent = monster.maxLife > 0 ? (monster.life / monster.maxLife) * 100 : 0;
       const deadClass = monster.isDead ? " dead" : "";
+      const ailmentIcons = monster.statusEffects
+        .filter((e) => e.duration > 0)
+        .map((e) => {
+          const icon = AILMENT_ICONS[e.type];
+          const label = AILMENT_NAMES[e.type];
+          const dmgInfo = e.damagePerTick > 0 ? ` ${e.damagePerTick}` : "";
+          const extra = e.increasedDamageTaken ? ` +${e.increasedDamageTaken}%` : "";
+          return `<span class="ailment-badge ailment-${e.type}" title="${label} ${dmgInfo}${extra} · ${e.duration}回合">${icon}${dmgInfo || extra}</span>`;
+        }).join("");
       html += `
         <div class="enemy-row${deadClass}">
           <span class="enemy-name">${monster.name} Lv.${this.state.combat.getMonsterLevel(monster.name)}</span>
@@ -1796,26 +2076,50 @@ export class UIController {
             <div class="enemy-hp-fill" style="width:${hpPercent}%"></div>
           </div>
           <span class="enemy-hp-text">${monster.life}/${monster.maxLife}</span>
+          ${ailmentIcons ? `<span class="ailment-row">${ailmentIcons}</span>` : ""}
         </div>
       `;
     }
     enemiesContainer.innerHTML = html;
     
-    // 更新玩家状态
-    const playerStatus = this.state.combat.getPlayerStatus();
+    // 更新玩家状态（含异常状态提示）
     this.state.player.life = playerStatus.life;
     this.state.player.mana = playerStatus.mana;
+    this.state.player.energyShield = playerStatus.energyShield;
+    this.state.player.defenses.energyShield = playerStatus.energyShield;
     this.updateStatusBars();
+    
+    // 显示玩家异常状态
+    const playerAilmentContainer = document.getElementById("player-ailments");
+    if (playerAilmentContainer) {
+      const playerAilments = playerStatus.statusEffects
+        .filter((e) => e.duration > 0)
+        .map((e) => {
+          const icon = AILMENT_ICONS[e.type];
+          const label = AILMENT_NAMES[e.type];
+          const dmgInfo = e.damagePerTick > 0 ? ` ${e.damagePerTick}` : "";
+          const extra = e.increasedDamageTaken ? ` +${e.increasedDamageTaken}%` : "";
+          return `<span class="ailment-badge ailment-${e.type}" title="${label}${dmgInfo}${extra} · ${e.duration}回合">${icon}</span>`;
+        }).join("");
+      playerAilmentContainer.innerHTML = playerAilments;
+    }
   }
   
   // ===== 装备操作 =====
   
   private equipItem(itemId: string) {
     const player = this.state.player;
-    const itemIndex = player.inventory.items.findIndex((i) => i.id === itemId);
-    if (itemIndex === -1) return;
+    // 优先从背包找，找不到再从仓库找（仓库物品同样可直接装备）。
+    let itemIndex = player.inventory.items.findIndex((i) => i.id === itemId);
+    let container = player.inventory.items;
+    if (itemIndex === -1) {
+      const stash = this.getStash();
+      itemIndex = stash.items.findIndex((i) => i.id === itemId);
+      if (itemIndex === -1) return;
+      container = stash.items;
+    }
 
-    const item = player.inventory.items[itemIndex];
+    const item = container[itemIndex];
     const base = ALL_BASES.find((candidate) => candidate.id === item.baseId);
     const missingRequirement = Object.entries(base?.requiredStats || [])
       .find(([stat, required]) => (player.stats[stat as keyof typeof player.stats] || 0) < (required || 0));
@@ -1826,7 +2130,7 @@ export class UIController {
 
     const currentEquipped = player.equipment[item.slot];
     player.equipment[item.slot] = item;
-    player.inventory.items.splice(itemIndex, 1);
+    container.splice(itemIndex, 1);
     if (currentEquipped) {
       player.inventory.items.push(currentEquipped);
       this.addLog(`卸下: ${currentEquipped.name}`);
@@ -2180,7 +2484,9 @@ export class UIController {
       .filter((gem) => !socketedGemIds.has(gem.id) && this.state.player.level >= gem.requiredLevel)
       .map((gem) => getGemById(gem.id))
       .filter((gem): gem is GemData => gem !== undefined);
-    this.itemDetailUI.show(item, isEquipped, availableGems);
+    // 非已装备物品：传入同槽位的已装备物品用于对比
+    const equippedComparison = isEquipped ? null : (this.state.player.equipment[item.slot] ?? null);
+    this.itemDetailUI.show(item, isEquipped, availableGems, equippedComparison);
   }
   
   private showPlayerInfo() {
@@ -2224,36 +2530,32 @@ export class UIController {
     let evasionIncreased = 0;
     let esIncreased = 0;
     
-    // 统一读取装备属性，兼容词缀数据中的可读名称和标准字段。
     for (const item of Object.values(player.equipment)) {
       if (!item) continue;
       const stats = calculateItemStats(item);
       for (const [key, value] of Object.entries(stats)) {
         switch (key) {
-          case "armor":
-          case "flat armor": totalArmor += value; break;
-          case "percent armor": armorIncreased += value; break;
-          case "evasion":
-          case "flat evasion": totalEvasion += value; break;
-          case "percent evasion": evasionIncreased += value; break;
-          case "energyShield":
-          case "flat es": totalES += value; break;
-          case "percent es": esIncreased += value; break;
-          case "fireResistance": case "fire resistance": totalFireRes += value; break;
-          case "coldResistance": case "cold resistance": totalColdRes += value; break;
-          case "lightningResistance": case "lightning resistance": totalLightningRes += value; break;
-          case "chaosResistance": case "chaos resistance": totalChaosRes += value; break;
-          case "physicalDamage": case "flat phys weapon": totalDamage += value; break;
-          case "percent phys weapon": case "flat attack damage": case "flat elemental damage": case "flat spell damage": increasedDamage += value; break;
-          case "attackSpeed": case "attack speed": totalAttackSpeed += value; break;
-          case "critChance": case "critical chance": totalCritChance += value; break;
+          case "armor": totalArmor += value; break;
+          case "percentArmor": armorIncreased += value; break;
+          case "evasion": totalEvasion += value; break;
+          case "percentEvasion": evasionIncreased += value; break;
+          case "energyShield": totalES += value; break;
+          case "percentEs": esIncreased += value; break;
+          case "fireResistance": totalFireRes += value; break;
+          case "coldResistance": totalColdRes += value; break;
+          case "lightningResistance": totalLightningRes += value; break;
+          case "chaosResistance": totalChaosRes += value; break;
+          case "physicalDamage": totalDamage += value; break;
+          case "flatAttackDamage": case "flatElementalDamage": case "flatSpellDamage": case "percentPhysWeapon": increasedDamage += value; break;
+          case "attackSpeed": totalAttackSpeed += value; break;
+          case "critChance": totalCritChance += value; break;
           case "strength": totalStrength += value; break;
           case "dexterity": totalDexterity += value; break;
           case "intelligence": totalIntelligence += value; break;
-          case "maxLife": case "flat life": flatLife += value; break;
-          case "percent life": case "maxLife increased": lifeIncreased += value; break;
-          case "maxMana": case "flat mana": flatMana += value; break;
-          case "percent mana": case "maxMana increased": manaIncreased += value; break;
+          case "maxLife": flatLife += value; break;
+          case "percentLife": lifeIncreased += value; break;
+          case "maxMana": flatMana += value; break;
+          case "percentMana": manaIncreased += value; break;
         }
       }
     }
@@ -2315,7 +2617,7 @@ export class UIController {
       ? "zone-select"
       : this.previousMainView;
     this.setMainView(restoreView);
-    this.closeUtilityPanel();
+    this.closeCenterPanel();
     this.addLog("关闭地图仪");
   }
 
@@ -2524,10 +2826,10 @@ export class UIController {
         damage: [{
           stat: 'physicalDamage',
           modType: 'flat',
-          min: Math.floor(baseDamage * (1 + (type.type === 'physical' ? damageBonus : 0) / 100)),
-          max: Math.floor((baseDamage + map.tier) * (1 + (type.type === 'physical' ? damageBonus : 0) / 100)),
+          min: Math.floor(baseDamage * (1 + damageBonus / 100)),
+          max: Math.floor((baseDamage + map.tier) * (1 + damageBonus / 100)),
         }],
-        damageType: type.type,
+        damageType: type.type as any,
         attackSpeed: 0.8 + (speedBonus / 100) * 0.3,
         armor: 10 + map.tier * 5,
         evasion: 5 + map.tier * 3,
@@ -2627,6 +2929,7 @@ export class UIController {
           ["chromatic_orb", 10],
         ]),
         maxSlots: 50,
+        stash: { items: [], gems: [], currencies: new Map(), maxSlots: 60 },
       },
     };
   }
@@ -2659,9 +2962,9 @@ export class UIController {
       const element = document.getElementById(id);
       return !!element && getComputedStyle(element).display !== "none";
     });
-    const equipmentPanel = document.querySelector<HTMLElement>('[data-panel-content="equipment"]');
-    const skillsPanel = document.querySelector<HTMLElement>('[data-panel-content="skills"]');
-    const inventoryPanel = document.querySelector<HTMLElement>('[data-panel-content="inventory"]');
+    const equipmentPanel = document.querySelector<HTMLElement>('.center-section[data-panel-content="equipment"]');
+    const skillsPanel = document.querySelector<HTMLElement>('.center-section[data-panel-content="skills"]');
+    const inventoryPanel = document.querySelector<HTMLElement>('.center-section[data-panel-content="inventory"]');
     const pendingQuestIds = this.zoneSystem.getPendingRewardQuests().map((quest) => quest.id);
     const result = {
       singleMainView: this.mainView === "menu" ? visibleMainViews.length === 0 : visibleMainViews.length === 1,
@@ -2670,6 +2973,7 @@ export class UIController {
         scene: "scene-display",
         combat: "combat-display",
         "map-device": "map-device-display",
+        passive: "passive-view",
       }[this.mainView] || ""),
       eventsBoundOnce: this.eventsBound && this.keyboardEventsBound,
       scopedEquipmentSelector: !!equipmentPanel && equipmentPanel.querySelectorAll("[data-slot]").length > 0,

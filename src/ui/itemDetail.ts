@@ -1,6 +1,37 @@
 import { Item, GemColor, EquipSlot } from '../models/types';
 import { getSocketStats, getLinkGroups, getColorEmoji, getColorName, canSocketGem, socketGem, unsocketGem, changeSocketColor } from '../systems/socket';
 import { getGemById, GemData } from '../data/gems';
+import { calculateItemStats } from '../systems/affix';
+
+/** 特殊属性：每个属性的比较权重（越高越重要） */
+const STAT_WEIGHTS: Record<string, number> = {
+  maxLife: 1.5,
+  maxMana: 1.0,
+  armor: 1.2,
+  evasion: 1.0,
+  energyShield: 1.0,
+  fireResistance: 2.0,
+  coldResistance: 2.0,
+  lightningResistance: 2.0,
+  chaosResistance: 2.5,
+  physicalDamage: 2.0,
+  fireDamage: 1.5,
+  coldDamage: 1.5,
+  lightningDamage: 1.5,
+  attackSpeed: 1.5,
+  critChance: 1.8,
+  critMultiplier: 1.5,
+  accuracy: 1.0,
+  strength: 0.5,
+  dexterity: 0.5,
+  intelligence: 0.5,
+  blockChance: 1.2,
+};
+
+/** 特殊属性是否为 "越高越好"（默认 true，false 表示越低越好如需求） */
+const HIGHER_IS_BETTER: Record<string, boolean> = {
+  // 目前所有属性都是越高越好，留空即可
+};
 
 export class ItemDetailUI {
   private currentItem: Item | null = null;
@@ -26,7 +57,7 @@ export class ItemDetailUI {
     });
   }
   
-  show(item: Item, isEquipped: boolean = false, availableGems: GemData[] = []) {
+  show(item: Item, isEquipped: boolean = false, availableGems: GemData[] = [], equippedComparison?: Item | null) {
     this.currentItem = item;
     
     const modal = document.getElementById('item-modal');
@@ -39,8 +70,8 @@ export class ItemDetailUI {
     // 设置标题
     title.textContent = '装备详情';
     
-    // 生成详情内容
-    content.innerHTML = this.renderItemDetail(item, availableGems);
+    // 生成详情内容（含对比）
+    content.innerHTML = this.renderItemDetail(item, availableGems, equippedComparison ?? null);
     
     // 生成操作按钮
     let footerHtml = '';
@@ -98,7 +129,7 @@ export class ItemDetailUI {
     this.currentItem = null;
   }
   
-  private renderItemDetail(item: Item, availableGems: GemData[]): string {
+  private renderItemDetail(item: Item, availableGems: GemData[], equippedItem: Item | null): string {
     let html = '<div class="item-detail">';
     
     // 头部：名称、基底、等级
@@ -129,7 +160,8 @@ export class ItemDetailUI {
             affix.stats.map(stat => {
               const value = stat.rolled !== undefined ? stat.rolled : (stat.min + stat.max) / 2;
               const modStr = stat.modType === 'flat' ? `+${value}` : `+${value}%`;
-              return `<div class="item-stat implicit">${modStr} ${this.getStatName(stat.stat)}</div>`;
+              const diffClass = this.getComparisonClass(stat.stat, value, equippedItem);
+              return `<div class="item-stat implicit${diffClass}">${modStr} ${this.getStatName(stat.stat)}</div>`;
             }).join('')
           ).join('')}
         </div>
@@ -150,7 +182,8 @@ export class ItemDetailUI {
             affix.stats.map(stat => {
               const value = stat.rolled !== undefined ? stat.rolled : (stat.min + stat.max) / 2;
               const modStr = stat.modType === 'flat' ? `+${value}` : `+${value}%`;
-              return `<div class="item-stat prefix">${modStr} ${this.getStatName(stat.stat)}</div>`;
+              const diffClass = this.getComparisonClass(stat.stat, value, equippedItem);
+              return `<div class="item-stat prefix${diffClass}">${modStr} ${this.getStatName(stat.stat)}</div>`;
             }).join('')
           ).join('')}
         </div>
@@ -166,7 +199,8 @@ export class ItemDetailUI {
             affix.stats.map(stat => {
               const value = stat.rolled !== undefined ? stat.rolled : (stat.min + stat.max) / 2;
               const modStr = stat.modType === 'flat' ? `+${value}` : `+${value}%`;
-              return `<div class="item-stat suffix">${modStr} ${this.getStatName(stat.stat)}</div>`;
+              const diffClass = this.getComparisonClass(stat.stat, value, equippedItem);
+              return `<div class="item-stat suffix${diffClass}">${modStr} ${this.getStatName(stat.stat)}</div>`;
             }).join('')
           ).join('')}
         </div>
@@ -182,6 +216,93 @@ export class ItemDetailUI {
           ${requirements.map(req => `<div class="item-stat requirement">${req}</div>`).join('')}
         </div>
       `;
+    }
+    
+    // 对比面板
+    if (equippedItem) {
+      html += this.renderComparisonSummary(item, equippedItem);
+    }
+    
+    html += '</div>';
+    return html;
+  }
+  
+  /**
+   * 计算单条属性相对于已装备物品的对比 CSS class。
+   * 返回 " diff-better" / " diff-worse" / " diff-new" / ""
+   */
+  private getComparisonClass(statName: string, newValue: number, equippedItem: Item | null): string {
+    if (!equippedItem) return '';
+    const equippedStats = calculateItemStats(equippedItem);
+    const equippedValue = equippedStats[statName] ?? 0;
+    if (equippedValue === 0 && newValue > 0) return ' diff-new';
+    if (newValue > equippedValue) return ' diff-better';
+    if (newValue < equippedValue) return ' diff-worse';
+    return '';
+  }
+  
+  /**
+   * 渲染对比摘要：总分对比 + 各属性差异列表。
+   */
+  private renderComparisonSummary(newItem: Item, equippedItem: Item): string {
+    const newStats = calculateItemStats(newItem);
+    const equippedStats = calculateItemStats(equippedItem);
+    
+    // 计算加权总分
+    const weightedScore = (stats: Record<string, number>): number => {
+      return Object.entries(stats).reduce((total, [key, value]) => {
+        const weight = STAT_WEIGHTS[key] ?? 1;
+        return total + value * weight;
+      }, 0) + newItem.itemLevel * 0.5 + newItem.quality * 0.3;
+    };
+    const newScore = weightedScore(newStats);
+    const equippedScore = weightedScore(equippedStats);
+    const scoreDelta = newScore - equippedScore;
+    
+    // 收集所有有差异的属性
+    const allStatKeys = new Set([...Object.keys(newStats), ...Object.keys(equippedStats)]);
+    const diffs: { stat: string; newVal: number; oldVal: number; delta: number }[] = [];
+    
+    for (const key of allStatKeys) {
+      const newVal = newStats[key] ?? 0;
+      const oldVal = equippedStats[key] ?? 0;
+      if (newVal !== oldVal) {
+        diffs.push({ stat: key, newVal, oldVal, delta: newVal - oldVal });
+      }
+    }
+    
+    // 按权重排序，重要的在前
+    diffs.sort((a, b) => (STAT_WEIGHTS[b.stat] ?? 1) - (STAT_WEIGHTS[a.stat] ?? 1));
+    
+    let html = '<div class="item-comparison">';
+    html += '<div class="item-section-title">📊 对比已装备</div>';
+    
+    // 总分对比
+    const scoreClass = scoreDelta > 0 ? 'diff-better' : scoreDelta < 0 ? 'diff-worse' : '';
+    const scoreLabel = scoreDelta > 0 ? `↑ +${Math.floor(scoreDelta)}` : scoreDelta < 0 ? `↓ ${Math.floor(scoreDelta)}` : '— 持平';
+    html += `<div class="comparison-score ${scoreClass}">综合评分：${scoreLabel}</div>`;
+    
+    // 已装备物品名
+    html += `<div class="comparison-equipped-name">当前：${equippedItem.name}</div>`;
+    
+    // 属性差异列表
+    if (diffs.length > 0) {
+      html += '<div class="comparison-diffs">';
+      for (const diff of diffs) {
+        const diffClass = diff.delta > 0 ? 'diff-better' : 'diff-worse';
+        const sign = diff.delta > 0 ? '+' : '';
+        const name = this.getStatName(diff.stat);
+        html += `<div class="comparison-diff-row ${diffClass}">`;
+        html += `<span class="diff-stat-name">${name}</span>`;
+        html += `<span class="diff-old">${diff.oldVal}</span>`;
+        html += `<span class="diff-arrow">→</span>`;
+        html += `<span class="diff-new-val">${diff.newVal}</span>`;
+        html += `<span class="diff-delta">(${sign}${diff.delta})</span>`;
+        html += `</div>`;
+      }
+      html += '</div>';
+    } else {
+      html += '<div class="comparison-diffs"><div class="comparison-diff-row">属性完全相同</div></div>';
     }
     
     html += '</div>';
@@ -384,25 +505,25 @@ export class ItemDetailUI {
       'coldResistance': '冰冷抗性',
       'lightningResistance': '闪电抗性',
       'chaosResistance': '混沌抗性',
-      'physicalDamage increased': '物理伤害',
-      'fireDamage increased': '火焰伤害',
-      'coldDamage increased': '冰冷伤害',
-      'lightningDamage increased': '闪电伤害',
-      'elementalDamage increased': '元素伤害',
-      'attackSpeed increased': '攻击速度',
-      'castSpeed increased': '施法速度',
-      'critChance increased': '暴击几率',
-      'critMultiplier increased': '暴击伤害',
-      'accuracy increased': '命中值',
-      'fireResistance increased': '火焰抗性',
-      'coldResistance increased': '冰冷抗性',
-      'lightningResistance increased': '闪电抗性',
-      'chaosResistance increased': '混沌抗性',
-      'maxLife increased': '最大生命',
-      'maxMana increased': '最大魔力',
-      'armor increased': '护甲',
-      'evasion increased': '闪避',
-      'energyShield increased': '能量护盾',
+      'flatArmor': '护甲',
+      'percentArmor': '护甲%',
+      'flatEvasion': '闪避',
+      'percentEvasion': '闪避%',
+      'flatEs': '能量护盾',
+      'percentEs': '能量护盾%',
+      'flatLife': '生命',
+      'percentLife': '生命%',
+      'flatMana': '魔力',
+      'percentMana': '魔力%',
+      'flatPhysWeapon': '物理伤害',
+      'percentPhysWeapon': '物理伤害%',
+      'flatAttackDamage': '攻击伤害',
+      'flatElementalDamage': '元素伤害',
+      'flatSpellDamage': '法术伤害',
+      'blockChance': '格挡几率',
+      'lifeLeech': '生命偷取',
+      'manaLeech': '魔力偷取',
+      'allResistance': '全抗性',
     };
     return statNames[stat] || stat;
   }

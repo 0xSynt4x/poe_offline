@@ -61,6 +61,10 @@ export class MapDevice {
 
   // 打开地图
   openMap(mapId: string, playerLevel: number): { success: boolean; map?: GameMap; message: string } {
+    if (this.state.currentMap || this.state.isMapActive) {
+      return { success: false, message: '已有地图开启中' };
+    }
+
     const map = this.state.mapInventory.find(m => m.id === mapId);
     if (!map) {
       return { success: false, message: '地图不存在' };
@@ -102,23 +106,26 @@ export class MapDevice {
     }
 
     // 标记完成
-    this.state.completedMapIds.push(map.id);
+    if (!this.state.completedMapIds.includes(map.id)) {
+      this.state.completedMapIds.push(map.id);
+    }
     if (map.tier > this.state.bestTier) {
       this.state.bestTier = map.tier;
     }
+    map.isCompleted = true;
     this.state.currentMap = null;
     this.state.isMapActive = false;
 
     // 计算经验奖励
     const baseExp = 50 + map.tier * 20;
     const effects = getMapEffects(map);
-    const expBonus = 1 + effects.itemRarity / 100;
-    const expReward = Math.floor(baseExp * expBonus);
+    const expReward = baseExp;
 
     // 生成掉落地图（掉落等级：玩家等级±3）
     const drops: GameMap[] = [];
     const dropChance = Math.min(0.95, 0.3 + map.tier * 0.03 + effects.itemQuantity / 200);
-    if (Math.random() < dropChance) {
+    const mapDropBonus = effects.itemRarity / 100;
+    if (Math.random() < Math.min(0.99, dropChance + mapDropBonus * 0.25)) {
       const newMap = generateRandomMap(playerLevel);
       drops.push(newMap);
     }
@@ -140,10 +147,11 @@ export class MapDevice {
       const currencies = ['scroll_of_wisdom', 'orb_of_alteration', 'chromatic_orb', 'orb_of_scouring', 'orb_of_portal'];
       const rareCurrencies = ['orb_of_alchemy', 'orb_of_regret', 'chaos_orb', 'regal_orb'];
 
-      if (Math.random() < 0.3 + map.tier * 0.03) {
+      if (Math.random() < Math.min(0.95, 0.3 + map.tier * 0.03 + effects.itemRarity / 200)) {
         droppedCurrency.push({ id: rareCurrencies[Math.floor(Math.random() * rareCurrencies.length)], amount: 1 });
       } else {
-        droppedCurrency.push({ id: currencies[Math.floor(Math.random() * currencies.length)], amount: 1 + Math.floor(Math.random() * 2) });
+        const amount = 1 + Math.floor(Math.random() * 2) + Math.floor(effects.itemQuantity / 100);
+        droppedCurrency.push({ id: currencies[Math.floor(Math.random() * currencies.length)], amount });
       }
     }
 

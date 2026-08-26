@@ -4,7 +4,8 @@
   "description": "PoE风格文字游戏",
   "scripts": {
     "build": "npx tsx build.ts",
-    "start": "dist.html"
+    "start": "dist.html",
+    "import:gems": "node scripts/importPobGems.js"
   },
   "devDependencies": {
     "esbuild": "^0.20.0",

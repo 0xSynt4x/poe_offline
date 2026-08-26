@@ -1,5 +1,4 @@
-import { Player, Item, EquipSlot, GemColor, GemType } from '../models/types';
-import { createSkillGroup } from './gemLink';
+import { Player, Item, EquipSlot, SkillGroup, Flask } from '../models/types';
 import { MapDeviceState } from './mapDevice';
 
 // ===== 存档数据结构 =====
@@ -40,14 +39,20 @@ export interface SaveData {
     };
     passivePoints: number;
     allocatedNodes: string[];
-    equipment: Record<string, any>;
-    skillGroups: any[];
-    flasks: any[];
+    equipment: Partial<Record<EquipSlot, Item>>;
+    skillGroups: SkillGroup[];
+    flasks: (Flask | null)[];
     inventory: {
-      items: any[];
+      items: Item[];
       gems: any[];
       currencies: Record<string, number>;
       maxSlots: number;
+      stash: {
+        items: Item[];
+        gems: any[];
+        currencies: Record<string, number>;
+        maxSlots: number;
+      };
     };
   };
   zoneProgress: {
@@ -57,8 +62,9 @@ export interface SaveData {
     completedQuests: string[];
     pendingRewards: string[];
     activeQuests: string[];
+    currentZoneResolved: boolean;
   };
-  mapDevice?: MapDeviceState;
+  mapDevice: MapDeviceState;
   settings: {
     autoSave: boolean;
     autoSaveInterval: number;
@@ -79,8 +85,6 @@ export interface SaveSlot {
 
 const SAVE_KEY_PREFIX = 'poe_text_game_save_';
 const MAX_SLOTS = 5;
-const AUTO_SAVE_KEY = 'poe_text_game_autosave';
-const VERSION = '1.0.0';
 
 export class SaveManager {
   private lastSaveTime: number = 0;
@@ -141,12 +145,12 @@ export class SaveManager {
   }
   
   // 保存游戏
-  save(slotId: string, player: Player, zoneProgress: any, mapDevice?: MapDeviceState): boolean {
+  save(slotId: string, player: Player, zoneProgress: any, mapDevice: MapDeviceState): boolean {
     try {
       const playTime = this.getPlayTime();
       
       const saveData: SaveData = {
-        version: VERSION,
+        version: '1.0.0',
         timestamp: Date.now(),
         playTime,
         slotName: this.generateSlotName(player, zoneProgress),
@@ -173,6 +177,12 @@ export class SaveManager {
             gems: JSON.parse(JSON.stringify(player.inventory.gems)),
             currencies: Object.fromEntries(player.inventory.currencies),
             maxSlots: player.inventory.maxSlots,
+            stash: player.inventory.stash ? {
+              items: JSON.parse(JSON.stringify(player.inventory.stash.items)),
+              gems: JSON.parse(JSON.stringify(player.inventory.stash.gems)),
+              currencies: Object.fromEntries(player.inventory.stash.currencies),
+              maxSlots: player.inventory.stash.maxSlots,
+            } : { items: [], gems: [], currencies: {}, maxSlots: 0 },
           },
         },
         zoneProgress: {
@@ -182,13 +192,14 @@ export class SaveManager {
           completedQuests: [...(zoneProgress.completedQuests || [])],
           pendingRewards: [...(zoneProgress.pendingRewards || [])],
           activeQuests: [...(zoneProgress.activeQuests || [])],
+          currentZoneResolved: !!zoneProgress.currentZoneResolved,
         },
-        mapDevice: mapDevice ? {
+        mapDevice: {
           ...mapDevice,
           currentMap: mapDevice.currentMap ? { ...mapDevice.currentMap } : null,
           mapInventory: mapDevice.mapInventory.map(map => ({ ...map })),
           completedMapIds: [...mapDevice.completedMapIds],
-        } : undefined,
+        },
         settings: {
           autoSave: true,
           autoSaveInterval: this.autoSaveInterval,
@@ -215,12 +226,6 @@ export class SaveManager {
       if (!data) return null;
       
       const save: SaveData = JSON.parse(data);
-      
-      // 版本迁移
-      if (save.version !== VERSION) {
-        // 这里可以添加版本迁移逻辑
-        save.version = VERSION;
-      }
       
       this.currentSlot = parseInt(slotId);
       this.playTimeStart = Date.now() - (save.playTime * 1000);
@@ -252,7 +257,7 @@ export class SaveManager {
       return false;
     }
     
-    return this.save(String(this.currentSlot), player, zoneProgress, mapDevice);
+    return this.save(String(this.currentSlot), player, zoneProgress, mapDevice!);
   }
   
   // 开始自动保存计时器
@@ -359,10 +364,7 @@ export class SaveManager {
   // 导入存档
   importSave(slotId: string, data: string): boolean {
     try {
-      const parsed = JSON.parse(data);
-      if (!parsed.version || !parsed.player) {
-        return false;
-      }
+      const parsed = JSON.parse(data) as SaveData;
       localStorage.setItem(SAVE_KEY_PREFIX + slotId, data);
       return true;
     } catch {

@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PoE文字游戏</title>
+  <!-- CSS_INLINE -->
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部状态栏 -->
+    <header id="header">
+      <div class="player-info">
+        <span class="player-name">角色名</span>
+        <span class="player-level">Lv.1</span>
+      </div>
+      <div class="status-bars">
+        <div class="bar life-bar">
+          <span class="bar-label">❤️</span>
+          <div class="bar-fill">
+            <div class="bar-fill-life" style="width: 85%"></div>
+          </div>
+          <span class="bar-text">850 / 1000</span>
+        </div>
+        <div class="bar mana-bar">
+          <span class="bar-label">🔮</span>
+          <div class="bar-fill">
+            <div class="bar-fill-mana" style="width: 60%"></div>
+          </div>
+          <span class="bar-text">120 / 200</span>
+        </div>
+        <div class="bar es-bar">
+          <span class="bar-label">🛡️</span>
+          <div class="bar-fill">
+            <div class="bar-fill-es" style="width: 40%"></div>
+          </div>
+          <span class="bar-text">200 / 500</span>
+        </div>
+      </div>
+      <div class="resistances">
+        <span class="res fire">🔥+15%</span>
+        <span class="res cold">❄️+20%</span>
+        <span class="res lightning">⚡+18%</span>
+        <span class="res chaos">☠️-5%</span>
+      </div>
+    </header>
+
+    <!-- 主体区域 -->
+    <main id="main">
+      <!-- 左侧图标导航 -->
+      <nav id="side-nav" aria-label="游戏面板导航" style="display:none;">
+        <div class="nav-brand" aria-hidden="true">✦</div>
+        <button class="nav-icon active" data-panel="character" title="角色属性" aria-label="角色属性">
+          <span class="nav-icon-glyph">♙</span>
+          <span class="nav-icon-badge">角色</span>
+        </button>
+        <button class="nav-icon" data-panel="equipment" title="装备" aria-label="装备">
+          <span class="nav-icon-glyph">◈</span>
+          <span class="nav-icon-badge">装备</span>
+        </button>
+        <button class="nav-icon" data-panel="skills" title="技能" aria-label="技能">
+          <span class="nav-icon-glyph">✧</span>
+          <span class="nav-icon-badge">技能</span>
+        </button>
+        <button class="nav-icon" data-panel="inventory" title="背包" aria-label="背包">
+          <span class="nav-icon-glyph">▦</span>
+          <span class="nav-icon-badge">背包</span>
+        </button>
+        <button class="nav-icon" data-panel="stash" title="仓库" aria-label="仓库">
+          <span class="nav-icon-glyph">▤</span>
+          <span class="nav-icon-badge">仓库</span>
+        </button>
+        <button class="nav-icon" data-panel="quests" title="任务" aria-label="任务">
+          <span class="nav-icon-glyph">☷</span>
+          <span class="nav-icon-badge">任务</span>
+        </button>
+        <button class="nav-icon" data-panel="log" title="战斗日志" aria-label="战斗日志">
+          <span class="nav-icon-glyph">≡</span>
+          <span class="nav-icon-badge">日志</span>
+        </button>
+        <span class="nav-divider" aria-hidden="true"></span>
+        <button class="nav-icon" data-panel="map" title="地图仪" aria-label="地图仪">
+          <span class="nav-icon-glyph">⌖</span>
+          <span class="nav-icon-badge">地图</span>
+        </button>
+        <button class="nav-icon" data-panel="passive" title="天赋树" aria-label="天赋树">
+          <span class="nav-icon-glyph">✹</span>
+          <span class="nav-icon-badge">天赋</span>
+        </button>
+        <button class="nav-icon" data-panel="save" title="存档" aria-label="存档">
+          <span class="nav-icon-glyph">▣</span>
+          <span class="nav-icon-badge">存档</span>
+        </button>
+      </nav>
+
+      <!-- 游戏主区域 -->
+      <section id="game-area">
+        <!-- 区域选择界面 -->
+        <div id="zone-select-display" class="panel">
+          <h2 class="panel-title">🗺️ 区域选择</h2>
+          <div id="zone-list"></div>
+        </div>
+
+        <!-- 探索界面 -->
+        <div id="scene-display" class="panel" style="display:none;">
+          <div id="zone-header">
+            <h2 class="panel-title" id="current-zone-name">区域名称</h2>
+            <p id="current-zone-desc" class="zone-desc">区域描述</p>
+          </div>
+          <div id="exploration-result" style="display:none;">
+            <div id="event-description"></div>
+            <div id="event-rewards"></div>
+          </div>
+          <div id="scene-actions">
+            <button class="scene-btn primary" id="btn-explore">🔍 探索</button>
+            <button class="scene-btn" id="btn-rest">🏕️ 休息</button>
+            <button class="scene-btn danger" id="btn-leave">🚪 离开</button>
+          </div>
+        </div>
+        
+        <div id="combat-display" class="panel" style="display:none;">
+          <h2 class="panel-title">⚔️ 战斗</h2>
+          <div id="action-bar"></div>
+          <div id="enemies"></div>
+        </div>
+
+        <div id="crafting-display" class="panel" style="display:none;">
+          <h2 class="panel-title">🔨 装备改造</h2>
+          <div id="crafting-slot">
+            <div class="craft-item-slot">放置装备</div>
+          </div>
+          <div id="craft-currency"></div>
+        </div>
+
+        <!-- 地图仪界面 -->
+        <div id="map-device-display" class="panel" style="display:none;">
+          <h2 class="panel-title">🗺️ 地图仪</h2>
+          <div id="map-device-slot">
+            <div class="map-slot" id="map-device-slot-inner">
+              <div class="slot-label">地图</div>
+              <div class="slot-content empty">放入地图</div>
+            </div>
+          </div>
+          <div id="map-device-info" style="display:none;">
+            <div class="map-info-title" id="map-info-title"></div>
+            <div id="map-modifiers" class="map-mods"></div>
+          </div>
+          <div class="map-list-panel">
+            <div class="item-section-title">可用地图</div>
+            <div id="map-list-content" class="map-list"></div>
+          </div>
+          <div id="map-device-actions">
+            <button class="map-action-btn primary" id="btn-open-map">🗝️ 开启地图</button>
+            <button class="map-action-btn" id="btn-close-map-device">关闭</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 悬浮信息面板 -->
+      <aside id="utility-drawer" aria-label="信息面板" style="display:none;">
+        <div class="drawer-header">
+          <div>
+            <span class="drawer-kicker">面板</span>
+            <h2 id="drawer-title">角色属性</h2>
+          </div>
+          <button id="drawer-close" class="drawer-close" title="关闭面板" aria-label="关闭面板">×</button>
+        </div>
+        <div id="utility-panel-content">
+          <!-- 角色属性 -->
+          <section class="panel utility-panel-section is-active" data-panel-content="character">
+            <h3 class="panel-title">角色属性</h3>
+            <div class="character-summary">
+              <div class="character-level"><span id="character-level">Lv.10</span><span id="character-exp">0 XP</span></div>
+              <div class="character-stat-grid">
+                <div><span>力量</span><strong id="character-strength">30</strong></div>
+                <div><span>敏捷</span><strong id="character-dexterity">20</strong></div>
+                <div><span>智慧</span><strong id="character-intelligence">15</strong></div>
+              </div>
+            </div>
+            <div class="attribute-section">
+              <div class="attribute-section-title">防御</div>
+              <div class="attribute-list">
+                <div><span>生命</span><strong id="character-life">500 / 500</strong></div>
+                <div><span>魔力</span><strong id="character-mana">100 / 100</strong></div>
+                <div><span>护甲</span><strong id="character-armor">100</strong></div>
+                <div><span>闪避</span><strong id="character-evasion">50</strong></div>
+                <div><span>能量护盾</span><strong id="character-es">0</strong></div>
+              </div>
+            </div>
+            <div class="attribute-section">
+              <div class="attribute-section-title">抗性</div>
+              <div class="resistance-grid">
+                <span class="res fire">火焰 <strong id="character-fire-res">0%</strong></span>
+                <span class="res cold">冰霜 <strong id="character-cold-res">0%</strong></span>
+                <span class="res lightning">闪电 <strong id="character-light-res">0%</strong></span>
+                <span class="res chaos">混沌 <strong id="character-chaos-res">-30%</strong></span>
+              </div>
+            </div>
+            <div class="attribute-section">
+              <div class="attribute-section-title">攻击</div>
+              <div class="attribute-list">
+                <div><span>伤害加成</span><strong id="character-damage">0%</strong></div>
+                <div><span>攻击速度</span><strong id="character-speed">1.00</strong></div>
+                <div><span>暴击率</span><strong id="character-crit">5%</strong></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 装备栏 -->
+          <section class="panel utility-panel-section" data-panel-content="equipment">
+            <h3 class="panel-title">装备</h3>
+            <div class="equipment-grid">
+              <div class="equip-slot" data-slot="helmet"><span class="slot-label">头</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="amulet"><span class="slot-label">项链</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="body"><span class="slot-label">胸</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="ring1"><span class="slot-label">戒指1</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="gloves"><span class="slot-label">手</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="ring2"><span class="slot-label">戒指2</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="belt"><span class="slot-label">腰</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="boots"><span class="slot-label">脚</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="offhand"><span class="slot-label">副手</span><div class="slot-content empty">-</div></div>
+              <div class="equip-slot" data-slot="weapon"><span class="slot-label">武器</span><div class="slot-content empty">-</div></div>
+            </div>
+          </section>
+
+          <!-- 技能组 -->
+          <section class="panel utility-panel-section" data-panel-content="skills">
+            <h3 class="panel-title">技能组 <span class="panel-subtitle">链接中的辅助宝石会自动生效</span></h3>
+            <div class="skill-slots">
+              <div class="skill-slot" data-key="1"><span class="skill-key">1</span><div class="skill-content empty">-</div></div>
+              <div class="skill-slot" data-key="2"><span class="skill-key">2</span><div class="skill-content empty">-</div></div>
+              <div class="skill-slot" data-key="3"><span class="skill-key">3</span><div class="skill-content empty">-</div></div>
+            </div>
+            <div class="build-actions">
+              <button id="btn-build-import" class="small-btn">导入 Build</button>
+              <button id="btn-build-export" class="small-btn">导出 Build</button>
+            </div>
+          </section>
+
+          <!-- 背包 -->
+          <section class="panel utility-panel-section stash-panel" data-panel-content="stash">
+            <div class="stash-heading">
+              <div>
+                <span class="drawer-kicker">STASH</span>
+                <h3 class="panel-title">仓库 <span class="panel-subtitle">PoE1 风格 · 共享储物箱</span></h3>
+              </div>
+              <span class="stash-capacity">12 / 60</span>
+            </div>
+            <div class="stash-tabs">
+              <button class="stash-tab active">通用仓库</button>
+              <button class="stash-tab">装备页</button>
+              <button class="stash-tab">货币页</button>
+              <button class="stash-add" title="新建仓库页">＋</button>
+            </div>
+            <div class="stash-layout">
+              <div class="stash-grid" id="stash-grid">
+                <div class="stash-cell filled rarity-rare"><span>★</span><small>荒芜之弦</small></div>
+                <div class="stash-cell filled rarity-magic"><span>◆</span><small>裂界护符</small></div>
+                <div class="stash-cell filled rarity-unique"><span>✦</span><small>先祖之路</small></div>
+                <div class="stash-cell filled rarity-normal"><span>◇</span><small>苍白法杖</small></div>
+                <div class="stash-cell filled rarity-rare"><span>▣</span><small>风暴胫甲</small></div>
+                <div class="stash-cell"><span>＋</span></div><div class="stash-cell"><span>＋</span></div><div class="stash-cell"><span>＋</span></div>
+                <div class="stash-cell"><span>＋</span></div><div class="stash-cell"><span>＋</span></div><div class="stash-cell"><span>＋</span></div><div class="stash-cell"><span>＋</span></div>
+              </div>
+              <div class="stash-preview">
+                <span class="stash-preview-label">当前选择</span>
+                <strong>共享仓库</strong>
+                <p>把物品放入仓库，稍后可在角色物品栏中取出。</p>
+                <div class="stash-hint">点击左侧“仓库”图标打开</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel utility-panel-section inventory-panel" data-panel-content="inventory">
+            <h3 class="panel-title">背包</h3>
+            <div id="inventory-tabs" class="tabs">
+              <button class="tab active" data-tab="items">装备</button>
+              <button class="tab" data-tab="currency">通货</button>
+              <button class="tab" data-tab="gems">宝石</button>
+            </div>
+            <div id="inventory-content" class="inventory-list"><div class="inventory-empty">暂无物品</div></div>
+          </section>
+
+          <!-- 任务 -->
+          <section id="quest-panel" class="panel utility-panel-section" data-panel-content="quests">
+            <h3 class="panel-title">📜 任务</h3>
+          </section>
+
+          <!-- 日志 -->
+          <section id="log-panel" class="panel utility-panel-section" data-panel-content="log">
+            <h3 class="panel-title">战斗日志</h3>
+            <div id="log-content"><div class="log-entry">欢迎来到PoE文字游戏</div></div>
+          </section>
+
+          <!-- 存档管理 -->
+          <section class="panel utility-panel-section" data-panel-content="save">
+            <div class="menu-saves" data-save-menu></div>
+          </section>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 底部操作栏 -->
+    <footer id="footer">
+      <div id="flask-bar" aria-label="药剂槽位"></div>
+      <div id="action-buttons">
+        <button class="action-btn">1: 裂风斩</button>
+        <button class="action-btn">2: 闪电箭</button>
+        <button class="action-btn">3: 闪避</button>
+        <span class="action-hint">面板请从左侧导航打开</span>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- 装备详情模态框 -->
+  <div id="item-modal" class="modal" style="display:none;">
+    <div class="modal-content item-modal-content">
+      <div class="modal-header">
+        <h2 id="item-modal-title">装备详情</h2>
+        <button class="modal-close item-modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="item-detail-content"></div>
+      </div>
+      <div class="modal-footer" id="item-modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- 天赋树模态框 -->
+  <div id="passive-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>天赋树</h2>
+        <button class="modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="passive-tree-container" class="passive-tree-container"></div>
+      </div>
+      <div class="modal-footer">
+        <span id="passive-points">天赋点: 0</span>
+        <button id="btn-reset-passive">重置天赋</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通货目标选择模态框 -->
+  <div id="currency-target-modal" class="modal" style="display:none;">
+    <div class="modal-content currency-target-modal-content">
+      <div class="modal-header">
+        <h2 id="currency-target-title">选择目标装备</h2>
+        <button class="modal-close" id="currency-target-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="currency-target-desc" class="currency-target-desc"></div>
+        <div id="currency-target-list" class="currency-target-list"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="item-action-btn close" id="currency-target-cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JS_INLINE -->
+</body>
+</html>

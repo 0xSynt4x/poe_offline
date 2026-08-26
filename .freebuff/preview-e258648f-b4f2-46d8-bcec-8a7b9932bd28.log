@@ -1,0 +1,5 @@
+
+> poe-text-game@0.1.0 build
+> npx tsx build.ts
+
+✅ dist.html  274.0 KB  (28ms)

@@ -1,0 +1,14 @@
+{
+  "name": "poe-text-game",
+  "version": "0.1.0",
+  "description": "PoE风格文字游戏",
+  "scripts": {
+    "build": "npx tsx build.ts",
+    "start": "dist.html"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.3.0"
+  }
+}

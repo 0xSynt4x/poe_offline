@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PoE文字游戏</title>
+  <style>
+/* ===== Reset & Base ===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-panel: #1c2333;
+  --bg-hover: #21262d;
+  --border: #30363d;
+  --border-light: #484f58;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-dim: #484f58;
+  --life-red: #da3633;
+  --life-red-dark: #8b1a1a;
+  --mana-blue: #388bfd;
+  --mana-blue-dark: #1a3a6b;
+  --es-gold: #d29922;
+  --es-gold-dark: #6b4f1a;
+  --res-fire: #da3633;
+  --res-cold: #58a6ff;
+  --res-lightning: #d29922;
+  --res-chaos: #a371f7;
+  --rarity-normal: #c8c8c8;
+  --rarity-magic: #6699cc;
+  --rarity-rare: #ffff00;
+  --rarity-unique: #ff8c00;
+  --damage-phys: #c8c8c8;
+  --damage-fire: #da3633;
+  --damage-cold: #58a6ff;
+  --damage-lightning: #d29922;
+  --damage-chaos: #a371f7;
+  --gem-red: #da3633;
+  --gem-green: #3fb950;
+  --gem-blue: #58a6ff;
+}
+
+html, body {
+  height: 100%;
+  font-family: "Microsoft YaHei", "SimHei", "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ===== Main Layout ===== */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 8px;
+  gap: 8px;
+}
+
+/* ===== Header (Status Bar) ===== */
+#header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.player-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.player-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--text-primary);
+}
+
+.player-level {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.status-bars {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.bar-label {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+}
+
+.bar-fill {
+  flex: 1;
+  height: 16px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.bar-fill-life {
+  height: 100%;
+  background: linear-gradient(180deg, var(--life-red) 0%, var(--life-red-dark) 100%);
+  transition: width 0.3s ease;
+}
+
+.bar-fill-mana {
+  height: 100%;
+  background: linear-gradient(180deg, var(--mana-blue) 0%, var(--mana-blue-dark) 100%);
+  transition: width 0.3s ease;
+}
+
+.bar-fill-es {
+  height: 100%;
+  background: linear-gradient(180deg, var(--es-gold) 0%, var(--es-gold-dark) 100%);
+  transition: width 0.3s ease;
+}
+
+.bar-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 70px;
+  text-align: right;
+}
+
+.resistances {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.res {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+}
+
+.res.fire { color: var(--res-fire); }
+.res.cold { color: var(--res-cold); }
+.res.lightning { color: var(--res-lightning); }
+.res.chaos { color: var(--res-chaos); }
+
+/* ===== Main Content ===== */
+#main {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+#game-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+#sidebar {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ===== Panels ===== */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ===== Scene Display ===== */
+#scene-display {
+  flex: 1;
+}
+
+.scene-content {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+.scene-content p {
+  margin-bottom: 8px;
+}
+
+/* ===== Combat Display ===== */
+#combat-display {
+  flex: 1;
+}
+
+#action-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+.action-slot {
+  padding: 4px 12px;
+  border-radius: 3px;
+  font-size: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+
+.action-slot.active {
+  border-color: var(--gem-green);
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.3);
+}
+
+.action-slot.enemy {
+  border-color: var(--life-red);
+}
+
+.enemy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.enemy-name {
+  min-width: 120px;
+  font-size: 13px;
+}
+
+.enemy-hp-bar {
+  flex: 1;
+  height: 10px;
+  background: #21262d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.enemy-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--life-red) 0%, #f85149 100%);
+  transition: width 0.3s ease;
+}
+
+.enemy-hp-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 50px;
+  text-align: right;
+}
+
+/* ===== Crafting Display ===== */
+#crafting-display {
+  flex: 1;
+}
+
+#crafting-slot {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+}
+
+.craft-item-slot {
+  width: 200px;
+  height: 100px;
+  border: 2px dashed var(--border-light);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* ===== Equipment Panel ===== */
+.equipment-panel {
+  flex-shrink: 0;
+}
+
+.equipment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.equip-slot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.equip-slot:hover {
+  border-color: var(--border-light);
+  background: var(--bg-hover);
+}
+
+.slot-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 36px;
+}
+
+.slot-content {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slot-content.empty {
+  color: var(--text-dim);
+}
+
+/* Rarity colors for equipped items */
+.slot-content.rarity-normal { color: var(--rarity-normal); }
+.slot-content.rarity-magic { color: var(--rarity-magic); }
+.slot-content.rarity-rare { color: var(--rarity-rare); }
+.slot-content.rarity-unique { color: var(--rarity-unique); }
+
+/* ===== Skills Panel ===== */
+.skills-panel {
+  flex-shrink: 0;
+}
+
+.skill-slots {
+  display: flex;
+  gap: 6px;
+}
+
+.skill-slot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.skill-slot:hover {
+  border-color: var(--mana-blue);
+}
+
+.skill-key {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--text-secondary);
+}
+
+.skill-content {
+  flex: 1;
+  font-size: 12px;
+  text-align: center;
+}
+
+.skill-content.empty {
+  color: var(--text-dim);
+}
+
+/* ===== Inventory Panel ===== */
+.inventory-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.tab {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.tab.active {
+  background: var(--bg-hover);
+  border-bottom-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+
+.inventory-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 0 0 4px 4px;
+  min-height: 80px;
+}
+
+.inventory-empty {
+  text-align: center;
+  color: var(--text-dim);
+  padding: 20px;
+  font-size: 13px;
+}
+
+/* ===== Footer (Action Bar) ===== */
+#footer {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+#action-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.action-btn {
+  padding: 6px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+
+.action-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--mana-blue);
+}
+
+.action-btn:active {
+  transform: scale(0.97);
+}
+
+/* ===== Log Panel ===== */
+#log-panel {
+  max-height: 100px;
+  flex-shrink: 0;
+}
+
+#log-content {
+  max-height: 80px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.log-entry {
+  padding: 2px 0;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-light);
+}
+
+</style>
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部状态栏 -->
+    <header id="header">
+      <div class="player-info">
+        <span class="player-name">角色名</span>
+        <span class="player-level">Lv.1</span>
+      </div>
+      <div class="status-bars">
+        <div class="bar life-bar">
+          <span class="bar-label">❤️</span>
+          <div class="bar-fill">
+            <div class="bar-fill-life" style="width: 85%"></div>
+          </div>
+          <span class="bar-text">850 / 1000</span>
+        </div>
+        <div class="bar mana-bar">
+          <span class="bar-label">🔮</span>
+          <div class="bar-fill">
+            <div class="bar-fill-mana" style="width: 60%"></div>
+          </div>
+          <span class="bar-text">120 / 200</span>
+        </div>
+        <div class="bar es-bar">
+          <span class="bar-label">🛡️</span>
+          <div class="bar-fill">
+            <div class="bar-fill-es" style="width: 40%"></div>
+          </div>
+          <span class="bar-text">200 / 500</span>
+        </div>
+      </div>
+      <div class="resistances">
+        <span class="res fire">🔥+15%</span>
+        <span class="res cold">❄️+20%</span>
+        <span class="res lightning">⚡+18%</span>
+        <span class="res chaos">☠️-5%</span>
+      </div>
+    </header>
+
+    <!-- 主体区域 -->
+    <main id="main">
+      <!-- 左侧：游戏主区域 -->
+      <section id="game-area">
+        <div id="scene-display" class="panel">
+          <h2 class="panel-title">荒芜之地 - 枯萎森林</h2>
+          <div class="scene-content">
+            <p>你站在一片枯萎的森林中，空气中弥漫着腐败的气息。</p>
+            <p>前方隐约可见几个移动的身影...</p>
+          </div>
+        </div>
+        
+        <div id="combat-display" class="panel" style="display:none;">
+          <h2 class="panel-title">⚔️ 战斗</h2>
+          <div id="action-bar">
+            <div class="action-slot active">🟢 你</div>
+            <div class="action-slot enemy">🔴 怪物1</div>
+            <div class="action-slot enemy">🔴 怪物2</div>
+          </div>
+          <div id="enemies">
+            <div class="enemy-row">
+              <span class="enemy-name">骸骨战士 Lv.5</span>
+              <div class="enemy-hp-bar">
+                <div class="enemy-hp-fill" style="width:70%"></div>
+              </div>
+              <span class="enemy-hp-text">70/100</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="crafting-display" class="panel" style="display:none;">
+          <h2 class="panel-title">🔨 装备改造</h2>
+          <div id="crafting-slot">
+            <div class="craft-item-slot">放置装备</div>
+          </div>
+          <div id="craft-currency"></div>
+        </div>
+      </section>
+
+      <!-- 右侧：装备与背包 -->
+      <aside id="sidebar">
+        <!-- 装备栏 -->
+        <div class="panel equipment-panel">
+          <h3 class="panel-title">装备</h3>
+          <div class="equipment-grid">
+            <div class="equip-slot" data-slot="helmet">
+              <span class="slot-label">头</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="amulet">
+              <span class="slot-label">项链</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="body">
+              <span class="slot-label">胸</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="ring1">
+              <span class="slot-label">戒指1</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="gloves">
+              <span class="slot-label">手</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="ring2">
+              <span class="slot-label">戒指2</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="belt">
+              <span class="slot-label">腰</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="boots">
+              <span class="slot-label">脚</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="offhand">
+              <span class="slot-label">副手</span>
+              <div class="slot-content empty">-</div>
+            </div>
+            <div class="equip-slot" data-slot="weapon">
+              <span class="slot-label">武器</span>
+              <div class="slot-content empty">-</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 技能组 -->
+        <div class="panel skills-panel">
+          <h3 class="panel-title">技能</h3>
+          <div class="skill-slots">
+            <div class="skill-slot" data-key="1">
+              <span class="skill-key">1</span>
+              <div class="skill-content empty">-</div>
+            </div>
+            <div class="skill-slot" data-key="2">
+              <span class="skill-key">2</span>
+              <div class="skill-content empty">-</div>
+            </div>
+            <div class="skill-slot" data-key="3">
+              <span class="skill-key">3</span>
+              <div class="skill-content empty">-</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 背包 -->
+        <div class="panel inventory-panel">
+          <h3 class="panel-title">背包</h3>
+          <div id="inventory-tabs" class="tabs">
+            <button class="tab active" data-tab="items">装备</button>
+            <button class="tab" data-tab="currency">通货</button>
+            <button class="tab" data-tab="gems">宝石</button>
+          </div>
+          <div id="inventory-content" class="inventory-list">
+            <div class="inventory-empty">暂无物品</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 底部操作栏 -->
+    <footer id="footer">
+      <div id="action-buttons">
+        <button class="action-btn">1: 裂风斩</button>
+        <button class="action-btn">2: 闪电箭</button>
+        <button class="action-btn">3: 闪避</button>
+        <button class="action-btn">Q: 查看</button>
+        <button class="action-btn">W: 天赋</button>
+        <button class="action-btn">E: 药剂</button>
+      </div>
+    </footer>
+
+    <!-- 日志区域 -->
+    <div id="log-panel" class="panel">
+      <div id="log-content">
+        <div class="log-entry">欢迎来到PoE文字游戏</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+"use strict";(()=>{var h=[{id:"flat_life",name:"\u9C9C\u6D3B\u7684",category:"prefix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:80,min:80,max:100,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:50,max:79,modType:"flat",weight:300},{tier:3,itemLevelReq:40,min:30,max:49,modType:"flat",weight:600},{tier:4,itemLevelReq:20,min:15,max:29,modType:"flat",weight:1e3},{tier:5,itemLevelReq:1,min:5,max:14,modType:"flat",weight:2e3}]},{id:"percent_life",name:"\u5065\u5EB7\u7684",category:"prefix",tags:["armor"],tiers:[{tier:1,itemLevelReq:78,min:8,max:10,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:5,max:7,modType:"increased",weight:400},{tier:3,itemLevelReq:30,min:3,max:4,modType:"increased",weight:1e3}]},{id:"flat_mana",name:"\u5145\u6C9B\u7684",category:"prefix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:75,min:60,max:80,modType:"flat",weight:100},{tier:2,itemLevelReq:50,min:35,max:59,modType:"flat",weight:400},{tier:3,itemLevelReq:25,min:15,max:34,modType:"flat",weight:1200},{tier:4,itemLevelReq:1,min:5,max:14,modType:"flat",weight:2e3}]},{id:"flat_armor",name:"\u94C1\u58C1\u7684",category:"prefix",tags:["armor_body","armor_helmet","armor_gloves","armor_boots"],tiers:[{tier:1,itemLevelReq:82,min:120,max:180,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:70,max:119,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:35,max:69,modType:"flat",weight:1e3},{tier:4,itemLevelReq:10,min:10,max:34,modType:"flat",weight:2e3}]},{id:"percent_armor",name:"\u575A\u97E7\u7684",category:"prefix",tags:["armor_body","armor_helmet","armor_gloves","armor_boots"],tiers:[{tier:1,itemLevelReq:80,min:40,max:50,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:25,max:39,modType:"increased",weight:400},{tier:3,itemLevelReq:30,min:10,max:24,modType:"increased",weight:1e3}]},{id:"flat_evasion",name:"\u7075\u5DE7\u7684",category:"prefix",tags:["armor_body","armor_helmet","armor_gloves","armor_boots"],tiers:[{tier:1,itemLevelReq:80,min:150,max:220,modType:"flat",weight:100},{tier:2,itemLevelReq:55,min:80,max:149,modType:"flat",weight:400},{tier:3,itemLevelReq:30,min:40,max:79,modType:"flat",weight:1e3}]},{id:"flat_es",name:"\u5965\u672F\u7684",category:"prefix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:82,min:90,max:130,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:50,max:89,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:25,max:49,modType:"flat",weight:1e3}]},{id:"percent_es",name:"\u542F\u8FEA\u7684",category:"prefix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:78,min:30,max:40,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:15,max:29,modType:"increased",weight:400},{tier:3,itemLevelReq:25,min:5,max:14,modType:"increased",weight:1e3}]},{id:"flat_phys_weapon",name:"\u950B\u5229\u7684",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:84,min:40,max:70,modType:"flat",weight:100},{tier:2,itemLevelReq:65,min:20,max:39,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:8,max:19,modType:"flat",weight:1e3},{tier:4,itemLevelReq:15,min:2,max:7,modType:"flat",weight:2e3}]},{id:"percent_phys_weapon",name:"\u6BC1\u706D\u7684",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:82,min:100,max:139,modType:"increased",weight:100},{tier:2,itemLevelReq:60,min:60,max:99,modType:"increased",weight:400},{tier:3,itemLevelReq:35,min:30,max:59,modType:"increased",weight:1e3},{tier:4,itemLevelReq:10,min:10,max:29,modType:"increased",weight:2e3}]},{id:"flat_fire_weapon",name:"\u70C8\u7130\u4E4B",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:82,min:45,max:75,modType:"flat",weight:100},{tier:2,itemLevelReq:65,min:25,max:44,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:10,max:24,modType:"flat",weight:800},{tier:4,itemLevelReq:15,min:3,max:9,modType:"flat",weight:1500}]},{id:"flat_cold_weapon",name:"\u51B0\u971C\u4E4B",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:82,min:40,max:68,modType:"flat",weight:100},{tier:2,itemLevelReq:65,min:22,max:39,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:8,max:21,modType:"flat",weight:800},{tier:4,itemLevelReq:15,min:2,max:7,modType:"flat",weight:1500}]},{id:"flat_lightning_weapon",name:"\u95EA\u7535\u4E4B",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:82,min:1,max:100,modType:"flat",weight:100},{tier:2,itemLevelReq:65,min:1,max:60,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:1,max:30,modType:"flat",weight:800},{tier:4,itemLevelReq:15,min:1,max:12,modType:"flat",weight:1500}]},{id:"flat_chaos_weapon",name:"\u6DF7\u6C8C\u4E4B",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:85,min:30,max:55,modType:"flat",weight:50},{tier:2,itemLevelReq:70,min:15,max:29,modType:"flat",weight:200},{tier:3,itemLevelReq:50,min:5,max:14,modType:"flat",weight:600}]},{id:"flat_chaos_dmg_over_time",name:"\u8150\u8680\u7684",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:80,min:15,max:25,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:8,max:14,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:3,max:7,modType:"flat",weight:1e3}]},{id:"flat_spell_damage",name:"\u667A\u8005\u7684",category:"prefix",tags:["weapon_caster"],tiers:[{tier:1,itemLevelReq:84,min:80,max:110,modType:"increased",weight:100},{tier:2,itemLevelReq:65,min:50,max:79,modType:"increased",weight:400},{tier:3,itemLevelReq:40,min:25,max:49,modType:"increased",weight:1e3}]},{id:"flat_elemental_damage",name:"\u5143\u7D20\u4E4B",category:"prefix",tags:["weapon","jewelry"],tiers:[{tier:1,itemLevelReq:80,min:25,max:40,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:12,max:24,modType:"increased",weight:400},{tier:3,itemLevelReq:30,min:5,max:11,modType:"increased",weight:1e3}]},{id:"flat_attack_damage",name:"\u51F6\u731B\u7684",category:"prefix",tags:["weapon","jewelry"],tiers:[{tier:1,itemLevelReq:78,min:30,max:50,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:15,max:29,modType:"increased",weight:400},{tier:3,itemLevelReq:30,min:5,max:14,modType:"increased",weight:1e3}]},{id:"flat_projectile_damage",name:"\u7A7F\u900F\u7684",category:"prefix",tags:["weapon_ranged"],tiers:[{tier:1,itemLevelReq:80,min:25,max:40,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:12,max:24,modType:"increased",weight:400},{tier:3,itemLevelReq:30,min:5,max:11,modType:"increased",weight:1e3}]},{id:"flat_dot_multiplier",name:"\u8870\u8D25\u7684",category:"prefix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:82,min:20,max:30,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:10,max:19,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:5,max:9,modType:"flat",weight:1e3}]}],v=[{id:"fire_resistance",name:"\u70C8\u7130\u6297\u6027",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:80,min:40,max:48,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:30,max:39,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:20,max:29,modType:"flat",weight:800},{tier:4,itemLevelReq:15,min:10,max:19,modType:"flat",weight:1500},{tier:5,itemLevelReq:1,min:6,max:9,modType:"flat",weight:2e3}]},{id:"cold_resistance",name:"\u51B0\u971C\u6297\u6027",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:80,min:40,max:48,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:30,max:39,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:20,max:29,modType:"flat",weight:800},{tier:4,itemLevelReq:15,min:10,max:19,modType:"flat",weight:1500},{tier:5,itemLevelReq:1,min:6,max:9,modType:"flat",weight:2e3}]},{id:"lightning_resistance",name:"\u95EA\u7535\u6297\u6027",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:80,min:40,max:48,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:30,max:39,modType:"flat",weight:400},{tier:3,itemLevelReq:40,min:20,max:29,modType:"flat",weight:800},{tier:4,itemLevelReq:15,min:10,max:19,modType:"flat",weight:1500},{tier:5,itemLevelReq:1,min:6,max:9,modType:"flat",weight:2e3}]},{id:"chaos_resistance",name:"\u6DF7\u6C8C\u6297\u6027",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:82,min:30,max:35,modType:"flat",weight:80},{tier:2,itemLevelReq:60,min:20,max:29,modType:"flat",weight:300},{tier:3,itemLevelReq:35,min:10,max:19,modType:"flat",weight:800},{tier:4,itemLevelReq:10,min:5,max:9,modType:"flat",weight:1500}]},{id:"all_resistance",name:"\u5168\u80FD\u6297\u6027",category:"suffix",tags:["jewelry"],tiers:[{tier:1,itemLevelReq:85,min:10,max:13,modType:"flat",weight:50},{tier:2,itemLevelReq:65,min:6,max:9,modType:"flat",weight:200},{tier:3,itemLevelReq:40,min:3,max:5,modType:"flat",weight:600}]},{id:"strength",name:"\u529B\u91CF",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:82,min:50,max:55,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:30,max:49,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:15,max:29,modType:"flat",weight:1e3},{tier:4,itemLevelReq:1,min:8,max:14,modType:"flat",weight:2e3}]},{id:"dexterity",name:"\u654F\u6377",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:82,min:50,max:55,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:30,max:49,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:15,max:29,modType:"flat",weight:1e3},{tier:4,itemLevelReq:1,min:8,max:14,modType:"flat",weight:2e3}]},{id:"intelligence",name:"\u667A\u529B",category:"suffix",tags:["armor","jewelry"],tiers:[{tier:1,itemLevelReq:82,min:50,max:55,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:30,max:49,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:15,max:29,modType:"flat",weight:1e3},{tier:4,itemLevelReq:1,min:8,max:14,modType:"flat",weight:2e3}]},{id:"attack_speed",name:"\u8FC5\u6377\u7684",category:"suffix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:85,min:15,max:17,modType:"increased",weight:50},{tier:2,itemLevelReq:70,min:11,max:14,modType:"increased",weight:200},{tier:3,itemLevelReq:50,min:7,max:10,modType:"increased",weight:600},{tier:4,itemLevelReq:25,min:4,max:6,modType:"increased",weight:1500}]},{id:"cast_speed",name:"\u8FC5\u6377\u65BD\u6CD5",category:"suffix",tags:["weapon_caster","jewelry"],tiers:[{tier:1,itemLevelReq:85,min:18,max:22,modType:"increased",weight:50},{tier:2,itemLevelReq:70,min:12,max:17,modType:"increased",weight:200},{tier:3,itemLevelReq:50,min:7,max:11,modType:"increased",weight:600}]},{id:"critical_chance",name:"\u81F4\u547D\u7684",category:"suffix",tags:["weapon","jewelry"],tiers:[{tier:1,itemLevelReq:82,min:30,max:40,modType:"increased",weight:100},{tier:2,itemLevelReq:60,min:15,max:29,modType:"increased",weight:400},{tier:3,itemLevelReq:35,min:8,max:14,modType:"increased",weight:1e3}]},{id:"critical_multiplier",name:"\u6B8B\u66B4\u7684",category:"suffix",tags:["weapon","jewelry"],tiers:[{tier:1,itemLevelReq:85,min:25,max:35,modType:"flat",weight:80},{tier:2,itemLevelReq:65,min:15,max:24,modType:"flat",weight:300},{tier:3,itemLevelReq:40,min:8,max:14,modType:"flat",weight:800}]},{id:"accuracy",name:"\u7CBE\u51C6\u7684",category:"suffix",tags:["weapon","jewelry"],tiers:[{tier:1,itemLevelReq:80,min:300,max:400,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:150,max:299,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:60,max:149,modType:"flat",weight:1e3}]},{id:"life_leech",name:"\u6C72\u53D6\u7684",category:"suffix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:80,min:2,max:3,modType:"flat",weight:100},{tier:2,itemLevelReq:55,min:1,max:1,modType:"flat",weight:400}]},{id:"mana_leech",name:"\u6C72\u53D6\u6CD5\u529B",category:"suffix",tags:["weapon"],tiers:[{tier:1,itemLevelReq:75,min:2,max:3,modType:"flat",weight:100},{tier:2,itemLevelReq:50,min:1,max:1,modType:"flat",weight:400}]},{id:"block_chance",name:"\u683C\u6321\u7684",category:"suffix",tags:["armor_offhand"],tiers:[{tier:1,itemLevelReq:82,min:5,max:8,modType:"flat",weight:100},{tier:2,itemLevelReq:60,min:3,max:4,modType:"flat",weight:400},{tier:3,itemLevelReq:35,min:1,max:2,modType:"flat",weight:1e3}]},{id:"flask_effect",name:"\u836F\u5242\u5E08",category:"suffix",tags:["armor_belt"],tiers:[{tier:1,itemLevelReq:80,min:10,max:15,modType:"increased",weight:100},{tier:2,itemLevelReq:55,min:5,max:9,modType:"increased",weight:400}]}],T={rift_blade:[{stat:"physicalDamage",modType:"flat",min:10,max:20}],eternal_sword:[{stat:"accuracy",modType:"flat",min:50,max:100}],driftwood_wand:[{stat:"spellDamage",modType:"increased",min:10,max:20}],crude_bow:[{stat:"accuracy",modType:"flat",min:30,max:60}],gothic_shield:[{stat:"blockChance",modType:"flat",min:20,max:25}],iron_helmet:[{stat:"armor",modType:"flat",min:30,max:50}],scholar_hat:[{stat:"energyShield",modType:"flat",min:15,max:25}],plate_vest:[{stat:"armor",modType:"flat",min:80,max:120}],woven_garb:[{stat:"evasion",modType:"flat",min:60,max:100}],cloth_robe:[{stat:"energyShield",modType:"flat",min:40,max:70}],iron_gauntlets:[{stat:"armor",modType:"flat",min:15,max:30}],silk_gloves:[{stat:"energyShield",modType:"flat",min:10,max:18}],iron_greaves:[{stat:"armor",modType:"flat",min:15,max:30}],slippers:[{stat:"evasion",modType:"flat",min:10,max:20}],heavy_belt:[{stat:"strength",modType:"flat",min:10,max:25}],scholar_belt:[{stat:"intelligence",modType:"flat",min:10,max:25}],jade_amulet:[{stat:"dexterity",modType:"flat",min:10,max:30}],ruby_amulet:[{stat:"strength",modType:"flat",min:10,max:30}],iron_ring:[{stat:"physicalDamage",modType:"flat",min:1,max:4}],ruby_ring:[{stat:"fireResistance",modType:"flat",min:15,max:30}],sapphire_ring:[{stat:"coldResistance",modType:"flat",min:15,max:30}],topaz_ring:[{stat:"lightningResistance",modType:"flat",min:15,max:30}]};function g(e,t){return Math.floor(Math.random()*(t-e+1))+e}function w(e,t){let m=t.reduce((a,r)=>a+r,0),i=Math.random()*m;for(let a=0;a<e.length;a++)if(i-=t[a],i<=0)return e[a];return e[e.length-1]}function I(){return Math.random().toString(36).substring(2,10)}function x(e,t,m,i=[]){let r=(e==="prefix"?h:v).filter(l=>{let c=t.some(y=>l.tags.includes(y)),p=l.tiers.some(y=>m>=y.itemLevelReq),f=i.some(y=>y.id===l.id);return c&&p&&!f});if(r.length===0)return null;let o=w(r,r.map(l=>l.tiers.filter(p=>m>=p.itemLevelReq).sort((p,f)=>p.tier-f.tier)[0]?.weight||100)),d=o.tiers.filter(l=>m>=l.itemLevelReq).sort((l,c)=>l.tier-c.tier),s=w(d,d.map(l=>l.weight)),n=g(s.min,s.max);return{id:o.id,name:o.name,category:o.category,tags:o.tags,tier:s.tier,itemLevelReq:s.itemLevelReq,stats:[{stat:o.id.replace(/_/g," "),modType:s.modType,min:s.min,max:s.max,rolled:n}]}}function R(e,t,m){let i=g(e.sockets.min,e.sockets.max),a=k(i),o=(T[e.id]||[]).map(n=>({id:`implicit_${n.stat}`,name:"\u56FA\u6709",category:"prefix",tags:["implicit"],tier:1,itemLevelReq:1,stats:[{...n,rolled:g(n.min,n.max)}]})),d=[],s=[];if(m!=="normal"){if(m==="magic"){if(Math.random()<.6){let n=x("prefix",e.tags||[],t);n&&d.push(n)}if(Math.random()<.6){let n=x("suffix",e.tags||[],t);n&&s.push(n)}if(d.length===0&&s.length===0)if(Math.random()<.5){let n=x("prefix",e.tags||[],t);n&&d.push(n)}else{let n=x("suffix",e.tags||[],t);n&&s.push(n)}}else if(m==="rare"){let n=g(1,3),l=g(1,3);for(let c=0;c<n;c++){let p=x("prefix",e.tags||[],t,d);p&&d.push(p)}for(let c=0;c<l;c++){let p=x("suffix",e.tags||[],t,s);p&&s.push(p)}}}return{id:I(),name:P(m,e.name,d,s),baseId:e.id,slot:e.slot,rarity:m,itemLevel:t,implicit:o,prefixes:d,suffixes:s,sockets:a,quality:0}}function k(e){let t=[],m=["red","green","blue"];for(let i=0;i<e;i++)t.push({color:m[g(0,m.length-1)],gemId:null,linkedTo:[]});for(let i=0;i<e-1;i++)Math.random()<.5&&(t[i].linkedTo.push(i+1),t[i+1].linkedTo.push(i));return t}function P(e,t,m,i){if(e==="normal")return t;if(e==="magic"){let a=m[0]?.name||"",r=i[0]?.name||"";return`${a}${t}${r}`.trim()}if(e==="rare"){let a=["\u590D\u4EC7","\u6BC1\u706D","\u795E\u5723","\u9ED1\u6697","\u6C38\u6052","\u6DF7\u6C8C","\u5143\u7D20","\u94A2\u94C1","\u8840","\u7075\u9B42"],r=["\u4E4B\u5203","\u4E4B\u5FC3","\u4E4B\u89E6","\u4E4B\u6012","\u4E4B\u606F","\u4E4B\u6B4C","\u4E4B\u73AF","\u4E4B\u51A0"],o=a[g(0,a.length-1)],d=r[g(0,r.length-1)];return`${o}${d}`}return t}function q(e){let t={};return e.implicit.forEach(m=>{m.stats.forEach(i=>{let a=i.stat;t[a]||(t[a]=0),t[a]+=i.rolled||0})}),[...e.prefixes,...e.suffixes].forEach(m=>{m.stats.forEach(i=>{let a=i.stat;t[a]||(t[a]=0),t[a]+=i.rolled||0})}),t}function L(e){let m={normal:"#c8c8c8",magic:"#6699cc",rare:"#ffff00",unique:"#ff8c00"}[e.rarity]||"#c8c8c8",i=[];if(i.push(`<span style="color:${m}">${e.name}</span>`),i.push(`<span style="color:#888">\u7269\u54C1\u7B49\u7EA7: ${e.itemLevel}</span>`),e.sockets.length>0){let a=e.sockets.map(r=>({red:"\u{1F534}",green:"\u{1F7E2}",blue:"\u{1F535}",white:"\u26AA"})[r.color]||"\u26AA").join("");i.push(`\u63D2\u69FD: ${a}`)}return e.implicit.length>0&&(i.push("---"),e.implicit.forEach(a=>{a.stats.forEach(r=>{let o=r.modType==="flat"?`+${r.rolled}`:`+${r.rolled}%`;i.push(`<span style="color:#888">${o} ${r.stat}</span>`)})})),(e.prefixes.length>0||e.suffixes.length>0)&&(i.push("---"),[...e.prefixes,...e.suffixes].forEach(a=>{a.stats.forEach(r=>{let o=r.modType==="flat"?`+${r.rolled}`:`+${r.rolled}%`;i.push(`${o} ${r.stat}`)})})),i.join(`
+`)}var A=[{id:"rift_blade",name:"\u88C2\u9699\u4E4B\u5203",slot:"weapon",type:"sword_1h",implicit:[{stat:"physicalDamage",modType:"flat",min:10,max:20}],sockets:{min:3,max:6},requiredStats:{strength:20},tags:["weapon","melee"],levelReq:1},{id:"eternal_sword",name:"\u6C38\u6052\u4E4B\u5251",slot:"weapon",type:"sword_1h",implicit:[{stat:"accuracy",modType:"flat",min:50,max:100}],sockets:{min:3,max:6},requiredStats:{strength:10,dexterity:10},tags:["weapon","melee"],levelReq:20},{id:"labrys",name:"\u53CC\u5203\u5DE8\u65A7",slot:"weapon",type:"axe_2h",implicit:[{stat:"physicalDamage",modType:"flat",min:20,max:35}],sockets:{min:4,max:6},requiredStats:{strength:40},tags:["weapon","melee","two_hand"],levelReq:15},{id:"imperial_claw",name:"\u5E1D\u56FD\u4E4B\u722A",slot:"weapon",type:"claw",implicit:[{stat:"physicalDamage",modType:"flat",min:5,max:12},{stat:"lifeLeech",modType:"flat",min:1,max:2}],sockets:{min:3,max:6},requiredStats:{dexterity:20},tags:["weapon","melee"],levelReq:10},{id:"crude_bow",name:"\u7C97\u7CD9\u4E4B\u5F13",slot:"weapon",type:"bow",implicit:[{stat:"accuracy",modType:"flat",min:30,max:60}],sockets:{min:3,max:6},requiredStats:{dexterity:20},tags:["weapon","ranged"],levelReq:1},{id:"thicket_bow",name:"\u5BC6\u6797\u4E4B\u5F13",slot:"weapon",type:"bow",implicit:[{stat:"attackSpeed",modType:"increased",min:10,max:15}],sockets:{min:4,max:6},requiredStats:{dexterity:40},tags:["weapon","ranged"],levelReq:25},{id:"driftwood_wand",name:"\u6D6E\u6728\u9B54\u6756",slot:"weapon",type:"wand",implicit:[{stat:"spellDamage",modType:"increased",min:10,max:20}],sockets:{min:3,max:6},requiredStats:{intelligence:20},tags:["weapon","caster"],levelReq:1},{id:"crystal_sceptre",name:"\u6C34\u6676\u6743\u6756",slot:"weapon",type:"sceptre",implicit:[{stat:"elementalDamage",modType:"increased",min:15,max:25}],sockets:{min:3,max:6},requiredStats:{strength:10,intelligence:10},tags:["weapon","caster","melee"],levelReq:10}],M=[{id:"gothic_shield",name:"\u54E5\u7279\u4E4B\u76FE",slot:"offhand",type:"shield",implicit:[{stat:"blockChance",modType:"flat",min:20,max:25}],sockets:{min:2,max:4},requiredStats:{strength:30},tags:["armor","offhand"],levelReq:5},{id:"tower_shield",name:"\u9AD8\u5854\u4E4B\u76FE",slot:"offhand",type:"shield",implicit:[{stat:"armor",modType:"flat",min:80,max:120}],sockets:{min:3,max:6},requiredStats:{strength:50},tags:["armor","offhand"],levelReq:20}],E=[{id:"iron_helmet",name:"\u94C1\u76D4",slot:"helmet",type:"helmet",implicit:[{stat:"armor",modType:"flat",min:30,max:50}],sockets:{min:2,max:4},requiredStats:{strength:15},tags:["armor","helmet"],levelReq:1},{id:"scholar_hat",name:"\u5B66\u8005\u4E4B\u5E3D",slot:"helmet",type:"helmet",implicit:[{stat:"energyShield",modType:"flat",min:15,max:25}],sockets:{min:2,max:4},requiredStats:{intelligence:15},tags:["armor","helmet"],levelReq:1},{id:"lion_pelt",name:"\u72EE\u9E6B\u4E4B\u76D4",slot:"helmet",type:"helmet",implicit:[{stat:"evasion",modType:"flat",min:30,max:50}],sockets:{min:2,max:4},requiredStats:{dexterity:15},tags:["armor","helmet"],levelReq:1}],D=[{id:"plate_vest",name:"\u677F\u7532\u80CC\u5FC3",slot:"body",type:"body",implicit:[{stat:"armor",modType:"flat",min:80,max:120}],sockets:{min:3,max:6},requiredStats:{strength:30},tags:["armor","body"],levelReq:1},{id:"woven_garb",name:"\u7F16\u7EC7\u5916\u8863",slot:"body",type:"body",implicit:[{stat:"evasion",modType:"flat",min:60,max:100}],sockets:{min:3,max:6},requiredStats:{dexterity:30},tags:["armor","body"],levelReq:1},{id:"cloth_robe",name:"\u5E03\u888D",slot:"body",type:"body",implicit:[{stat:"energyShield",modType:"flat",min:40,max:70}],sockets:{min:3,max:6},requiredStats:{intelligence:30},tags:["armor","body"],levelReq:1}],C=[{id:"iron_gauntlets",name:"\u94C1\u624B\u5957",slot:"gloves",type:"gloves",implicit:[{stat:"armor",modType:"flat",min:15,max:30}],sockets:{min:2,max:4},requiredStats:{strength:10},tags:["armor","gloves"],levelReq:1},{id:"silk_gloves",name:"\u4E1D\u7EF8\u624B\u5957",slot:"gloves",type:"gloves",implicit:[{stat:"energyShield",modType:"flat",min:10,max:18}],sockets:{min:2,max:4},requiredStats:{intelligence:10},tags:["armor","gloves"],levelReq:1}],j=[{id:"iron_greaves",name:"\u94C1\u80EB\u7532",slot:"boots",type:"boots",implicit:[{stat:"armor",modType:"flat",min:15,max:30}],sockets:{min:2,max:4},requiredStats:{strength:10},tags:["armor","boots"],levelReq:1},{id:"slippers",name:"\u8F6F\u5E95\u978B",slot:"boots",type:"boots",implicit:[{stat:"evasion",modType:"flat",min:10,max:20}],sockets:{min:2,max:4},requiredStats:{dexterity:10},tags:["armor","boots"],levelReq:1}],O=[{id:"heavy_belt",name:"\u91CD\u8170\u5E26",slot:"belt",type:"belt",implicit:[{stat:"strength",modType:"flat",min:10,max:25}],sockets:{min:0,max:0},requiredStats:{},tags:["armor","belt"],levelReq:1},{id:"scholar_belt",name:"\u5B66\u8005\u8170\u5E26",slot:"belt",type:"belt",implicit:[{stat:"intelligence",modType:"flat",min:10,max:25}],sockets:{min:0,max:0},requiredStats:{},tags:["armor","belt"],levelReq:1}],G=[{id:"jade_amulet",name:"\u7FE1\u7FE0\u9879\u94FE",slot:"amulet",type:"amulet",implicit:[{stat:"dexterity",modType:"flat",min:10,max:30}],sockets:{min:0,max:0},requiredStats:{},tags:["jewelry","amulet"],levelReq:1},{id:"ruby_amulet",name:"\u7EA2\u5B9D\u77F3\u9879\u94FE",slot:"amulet",type:"amulet",implicit:[{stat:"strength",modType:"flat",min:10,max:30}],sockets:{min:0,max:0},requiredStats:{},tags:["jewelry","amulet"],levelReq:1}],$=[{id:"iron_ring",name:"\u94C1\u6212\u6307",slot:"ring1",type:"ring",implicit:[{stat:"physicalDamage",modType:"flat",min:1,max:4}],sockets:{min:0,max:0},requiredStats:{},tags:["jewelry","ring"],levelReq:1},{id:"ruby_ring",name:"\u7EA2\u5B9D\u77F3\u6212\u6307",slot:"ring1",type:"ring",implicit:[{stat:"fireResistance",modType:"flat",min:15,max:30}],sockets:{min:0,max:0},requiredStats:{},tags:["jewelry","ring"],levelReq:1},{id:"sapphire_ring",name:"\u84DD\u5B9D\u77F3\u6212\u6307",slot:"ring1",type:"ring",implicit:[{stat:"coldResistance",modType:"flat",min:15,max:30}],sockets:{min:0,max:0},requiredStats:{},tags:["jewelry","ring"],levelReq:1},{id:"topaz_ring",name:"\u9EC4\u7389\u6212\u6307",slot:"ring1",type:"ring",implicit:[{stat:"lightningResistance",modType:"flat",min:15,max:30}],sockets:{min:0,max:0},requiredStats:{},tags:["jewelry","ring"],levelReq:1}],W=[...A,...M,...E,...D,...C,...j,...O,...G,...$];function N(e){return W.filter(t=>t.slot===e)}function F(e,t){let m=N(e).filter(i=>i.levelReq<=t);return m.length===0?null:m[Math.floor(Math.random()*m.length)]}var u=class{constructor(){this.player=null;this.initialized=!1}init(){console.log("PoE\u6587\u5B57\u6E38\u620F\u521D\u59CB\u5316..."),this.player=this.createTestPlayer(),this.initialized=!0,this.testItemGeneration(),this.updateUI()}createTestPlayer(){return{name:"\u6D4B\u8BD5\u89D2\u8272",level:10,experience:0,stats:{strength:30,dexterity:20,intelligence:15},life:500,maxLife:500,mana:100,maxMana:100,manaReserved:0,energyShield:0,defenses:{armor:100,evasion:50,energyShield:0,fireRes:0,coldRes:0,lightningRes:0,chaosRes:-30,blockChance:0},offense:{increasedDamage:0,moreDamage:1,attackSpeed:1,critChance:5,critMultiplier:150,accuracy:100},passivePoints:0,allocatedNodes:[],equipment:{},skillGroups:[],inventory:{items:[],currencies:new Map,maxSlots:50}}}testItemGeneration(){console.log(`
+=== \u6D4B\u8BD5\u88C5\u5907\u751F\u6210 ===`);let t=["rift_blade","plate_vest","ruby_ring"],m=["normal","magic","rare"];for(let i of t)for(let a of m){let r=F("weapon",10);if(r){let o=R(r,10,a);console.log(`
+--- \u88C5\u5907 ---`),console.log(L(o)),console.log("\u5C5E\u6027:",q(o))}}}updateUI(){console.log(`
+=== \u6E38\u620FUI\u66F4\u65B0 ===`),console.log("\u73A9\u5BB6:",this.player?.name),console.log("\u7B49\u7EA7:",this.player?.level)}},U=new u;document.addEventListener("DOMContentLoaded",()=>U.init());})();
+
+</script>
+</body>
+</html>

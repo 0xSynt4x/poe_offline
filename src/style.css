@@ -3209,11 +3209,12 @@ html, body {
   white-space: nowrap;
 }
 
-/* 存储中心三栏布局：左仓库 / 中合成台 / 右背包 */
+/* ===== PoE1-style Storage Center ===== */
+/* 三栏布局：左仓库 / 中合成台 / 右背包 */
 .storage-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(150px, .7fr) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(130px, 1fr) 80px minmax(180px, 2fr);
+  gap: 6px;
   align-items: start;
 }
 
@@ -3221,37 +3222,47 @@ html, body {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
 }
 
 .storage-col-title {
-  color: var(--text-secondary);
-  font-size: 11px;
-  letter-spacing: 1px;
+  color: #6b7280;
+  font-size: 9px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
+  padding: 0 2px;
+  margin-bottom: 2px;
 }
 
+/* 合成台 */
 .craft-col .crafting-table {
-  padding: 8px;
+  padding: 4px;
   min-height: 0;
+  background: rgba(10, 14, 20, 0.6);
+  border: 1px solid #1e2430;
+  border-radius: 3px;
 }
 
 .craft-col .crafting-slot,
 .craft-col .crafting-result {
-  min-height: 64px;
-  font-size: 12px;
+  min-height: 56px;
+  font-size: 11px;
+  background: rgba(15, 20, 28, 0.8);
+  border: 1px dashed #2a3040;
+  border-radius: 3px;
 }
 
+/* 背包区域 */
 .backpack-col .inventory-list {
   max-height: 460px;
 }
 
 .backpack-section-title {
-  color: var(--text-secondary);
-  font-size: 11px;
-  margin: 6px 2px 4px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 3px;
+  color: #6b7280;
+  font-size: 10px;
+  margin: 4px 2px 3px;
+  border-bottom: 1px solid #1e2430;
+  padding-bottom: 2px;
 }
 
 .backpack-section:first-child .backpack-section-title {
@@ -3261,33 +3272,37 @@ html, body {
 .backpack-currencies {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 3px;
 }
 
 .backpack-currencies .inventory-currency {
   flex: 1 1 45%;
   min-width: 0;
-  padding: 4px 6px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  padding: 3px 5px;
+  background: rgba(15, 20, 28, 0.8);
+  border: 1px solid #1e2430;
+  border-radius: 2px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
+  color: #9ca3af;
+  transition: all 0.15s;
 }
 
 .backpack-currencies .inventory-currency:hover {
-  border-color: var(--es-gold);
-  background: var(--bg-hover);
+  border-color: #d29922;
+  background: rgba(25, 32, 42, 0.9);
+  color: #e5e7eb;
 }
 
+/* 旧版仓库格子（保留兼容） */
 .stash-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  padding: 6px;
-  background: #0b0f14;
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
+  gap: 3px;
+  padding: 4px;
+  background: #0a0d12;
+  border: 1px solid #1e2430;
+  border-radius: 3px;
 }
 
 .stash-cell {
@@ -3296,67 +3311,76 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  color: var(--text-dim);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  font-size: 18px;
+  color: #4b5563;
+  background: rgba(15, 20, 28, 0.8);
+  border: 1px solid #1e2430;
+  border-radius: 2px;
+  font-size: 16px;
   cursor: pointer;
+  transition: all 0.15s;
 }
 
 .stash-cell:hover,
 .stash-cell.filled:hover {
   transform: translateY(-1px);
-  border-color: var(--es-gold);
-  background: var(--bg-hover);
+  border-color: #d29922;
+  background: rgba(25, 32, 42, 0.9);
+  box-shadow: 0 0 6px rgba(210, 153, 34, 0.25);
 }
 
-.stash-cell.filled { color: var(--text-secondary); }
-.stash-cell.rarity-rare { color: var(--rarity-rare); }
-.stash-cell.rarity-magic { color: var(--rarity-magic); }
-.stash-cell.rarity-unique { color: var(--rarity-unique); }
+.stash-cell.filled { color: #9ca3af; }
+.stash-cell.rarity-rare { color: #eab308; border-color: rgba(234, 179, 8, 0.3); }
+.stash-cell.rarity-magic { color: #60a5fa; border-color: rgba(96, 165, 250, 0.3); }
+.stash-cell.rarity-unique { color: #f97316; border-color: rgba(249, 115, 22, 0.3); }
 
 /* ===== PoE1-style Stash Tabs & Grid ===== */
 .stash-tab-bar {
   display: flex;
-  gap: 2px;
-  margin-bottom: 4px;
+  gap: 1px;
+  margin-bottom: 0;
 }
 
 .stash-tab {
   flex: 1;
-  padding: 4px 6px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  padding: 4px 3px;
+  background: linear-gradient(180deg, #1a2030 0%, #141a24 100%);
+  border: 1px solid #2a3040;
+  border-bottom: none;
   border-radius: 3px 3px 0 0;
-  color: var(--text-secondary);
-  font-size: 11px;
+  color: #6b7280;
+  font-size: 10px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 
 .stash-tab:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: linear-gradient(180deg, #1e2636 0%, #181e28 100%);
+  color: #9ca3af;
 }
 
 .stash-tab.active {
-  background: var(--bg-primary);
-  color: var(--accent-color, var(--mana-blue));
-  border-bottom-color: var(--bg-primary);
+  background: linear-gradient(180deg, #0f141e 0%, #0a0e14 100%);
+  color: #d29922;
+  border-color: #3a4556;
+  font-weight: 600;
+  text-shadow: 0 0 8px rgba(210, 153, 34, 0.3);
 }
 
 .stash-grid-poe {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 3px;
-  padding: 6px;
-  background: #0b0f14;
-  border: 1px solid var(--border-light);
-  border-radius: 0 4px 4px 4px;
-  min-height: 160px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 3px;
+  background: #080b10;
+  border: 1px solid #1e2430;
+  border-top: 1px solid #2a3040;
+  border-radius: 0 3px 3px 3px;
+  min-height: 120px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 2px rgba(0,0,0,0.3);
 }
 
 .stash-grid-poe .stash-cell-poe {
@@ -3365,83 +3389,118 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   min-width: 0;
-  color: var(--text-dim);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  min-height: 30px;
+  color: #3b4252;
+  background: linear-gradient(180deg, rgba(15, 20, 28, 0.9) 0%, rgba(10, 14, 20, 0.9) 100%);
+  border: 1px solid #1a2030;
   border-radius: 2px;
-  font-size: 14px;
+  font-size: 11px;
   cursor: pointer;
   transition: all 0.15s;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
 }
 
 .stash-grid-poe .stash-cell-poe:hover,
 .stash-grid-poe .stash-cell-poe.filled:hover {
-  border-color: var(--es-gold);
-  background: var(--bg-hover);
+  border-color: #d29922;
+  background: linear-gradient(180deg, rgba(25, 32, 42, 0.95) 0%, rgba(18, 24, 32, 0.95) 100%);
+  box-shadow: 0 0 8px rgba(210, 153, 34, 0.3), inset 0 1px 2px rgba(0,0,0,0.3);
 }
 
-.stash-grid-poe .stash-cell-poe.filled { color: var(--text-secondary); }
-.stash-grid-poe .stash-cell-poe.rarity-rare { color: var(--rarity-rare); }
-.stash-grid-poe .stash-cell-poe.rarity-magic { color: var(--rarity-magic); }
-.stash-grid-poe .stash-cell-poe.rarity-unique { color: var(--rarity-unique); }
+.stash-grid-poe .stash-cell-poe.filled { color: #9ca3af; }
+.stash-grid-poe .stash-cell-poe.rarity-normal { color: #c8c8c8; }
+.stash-grid-poe .stash-cell-poe.rarity-magic {
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.35);
+  box-shadow: inset 0 0 4px rgba(96, 165, 250, 0.1);
+}
+.stash-grid-poe .stash-cell-poe.rarity-rare {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.35);
+  box-shadow: inset 0 0 4px rgba(234, 179, 8, 0.1);
+}
+.stash-grid-poe .stash-cell-poe.rarity-unique {
+  color: #f97316;
+  border-color: rgba(249, 115, 22, 0.35);
+  box-shadow: inset 0 0 4px rgba(249, 115, 22, 0.1);
+}
 
 .stash-grid-poe .stash-cell-poe small {
-  font-size: 9px;
+  font-size: 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-  padding: 0 2px;
+  padding: 0 1px;
+  opacity: 0.8;
 }
 
 /* ===== PoE1-style Grid Backpack ===== */
 .inventory-grid-poe {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  grid-auto-rows: 30px;
+  grid-template-columns: repeat(5, 1fr);
+  grid-auto-rows: 38px;
   gap: 2px;
-  padding: 6px;
-  background: #0b0f14;
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  min-height: 160px;
+  padding: 3px;
+  background: #080b10;
+  border: 1px solid #1e2430;
+  border-radius: 3px;
+  min-height: 200px;
   align-content: start;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6), inset 0 -1px 2px rgba(0,0,0,0.3);
 }
 
 .inventory-grid-poe .grid-item {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(15, 20, 28, 0.9) 0%, rgba(10, 14, 20, 0.9) 100%);
+  border: 1px solid #1a2030;
   border-radius: 2px;
   cursor: pointer;
   transition: all 0.15s;
   overflow: hidden;
   font-size: 10px;
-  color: var(--text-secondary);
+  color: #9ca3af;
   position: relative;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
 }
 
 .inventory-grid-poe .grid-item:hover {
-  border-color: var(--es-gold);
-  background: var(--bg-hover);
+  border-color: #d29922;
+  background: linear-gradient(180deg, rgba(25, 32, 42, 0.95) 0%, rgba(18, 24, 32, 0.95) 100%);
+  box-shadow: 0 0 8px rgba(210, 153, 34, 0.3), inset 0 1px 2px rgba(0,0,0,0.3);
+  z-index: 1;
 }
 
-.inventory-grid-poe .grid-item.rarity-rare { border-color: var(--rarity-rare); }
-.inventory-grid-poe .grid-item.rarity-magic { border-color: var(--rarity-magic); }
-.inventory-grid-poe .grid-item.rarity-unique { border-color: var(--rarity-unique); }
+.inventory-grid-poe .grid-item.rarity-normal { color: #c8c8c8; }
+.inventory-grid-poe .grid-item.rarity-magic {
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.35);
+  box-shadow: inset 0 0 4px rgba(96, 165, 250, 0.1);
+}
+.inventory-grid-poe .grid-item.rarity-rare {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.35);
+  box-shadow: inset 0 0 4px rgba(234, 179, 8, 0.1);
+}
+.inventory-grid-poe .grid-item.rarity-unique {
+  color: #f97316;
+  border-color: rgba(249, 115, 22, 0.35);
+  box-shadow: inset 0 0 4px rgba(249, 115, 22, 0.1);
+}
 
 .inventory-grid-poe .grid-item .grid-item-name {
   font-size: 9px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 1px 3px;
+  padding: 1px 2px;
   width: 100%;
   text-align: center;
+  line-height: 1.2;
 }
 
 /* Grid item sizes (span columns × span rows) */

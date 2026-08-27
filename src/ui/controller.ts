@@ -1322,11 +1322,49 @@ export class UIController {
   
   // ===== UI更新 =====
   
+  /** 渲染底部技能动作栏 (PoE1 风格) */
+  private renderActionBar() {
+    const container = document.getElementById("skill-action-bar");
+    if (!container) return;
+    const player = this.state.player;
+    const keys = ["1", "2", "3", "4", "5", "6"];
+    let html = "";
+    for (let i = 0; i < keys.length; i++) {
+      const group = player.skillGroups[i];
+      if (group) {
+        const colorClass = `gem-${group.activeGem.color}`;
+        const inCombat = this.state.inCombat ? " in-combat" : "";
+        html += `<div class="skill-action-slot${inCombat}" data-key="${i + 1}" title="${group.activeGem.name} (左键施放, 右键配置)">
+          <span class="skill-key-badge">${keys[i]}</span>
+          <span class="skill-slot-name ${colorClass}">${group.activeGem.name}</span>
+        </div>`;
+      } else {
+        html += `<div class="skill-action-slot empty" data-key="${i + 1}" title="空技能槽">
+          <span class="skill-key-badge">${keys[i]}</span>
+          <span class="skill-slot-name">-</span>
+        </div>`;
+      }
+    }
+    container.innerHTML = html;
+
+    // 绑定事件: 左键施放, 右键配置
+    container.querySelectorAll<HTMLElement>(".skill-action-slot").forEach((slot) => {
+      slot.addEventListener("click", (e) => {
+        this.useSkill(parseInt(slot.dataset.key || "1"));
+      });
+      slot.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this.showSkillConfig(parseInt(slot.dataset.key || "1") - 1);
+      });
+    });
+  }
+
   private updateAllUI() {
     this.updateStatusBars();
     this.updateEquipmentUI();
     this.updateSkillUI();
     this.updateFlaskUI();
+    this.renderActionBar();
     this.updateInventoryUI();
     this.updateStashUI();
     this.updateQuestUI();
@@ -1595,6 +1633,50 @@ export class UIController {
         slotElement.className = "slot-content empty";
       }
     }
+    // 更新 PoB 风格属性面板
+    this.updatePobStatsPanel();
+  }
+
+  private updatePobStatsPanel() {
+    const player = this.state.player;
+    const setText = (id: string, value: string) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    };
+
+    setText("pob-life", `${player.life} / ${player.maxLife}`);
+    setText("pob-mana", `${player.mana} / ${player.maxMana}`);
+    setText("pob-es", `${player.energyShield}`);
+    setText("pob-armor", `${player.defenses.armor}`);
+    setText("pob-evasion", `${player.defenses.evasion}`);
+    setText("pob-fire-res", `${player.defenses.fireRes}%`);
+    setText("pob-cold-res", `${player.defenses.coldRes}%`);
+    setText("pob-light-res", `${player.defenses.lightningRes}%`);
+    setText("pob-chaos-res", `${player.defenses.chaosRes}%`);
+    setText("pob-damage", `${player.offense.increasedDamage}%`);
+    setText("pob-speed", player.offense.attackSpeed.toFixed(2));
+    setText("pob-crit", `${player.offense.critChance}%`);
+    setText("pob-crit-mult", `${player.offense.critMultiplier}%`);
+
+    // DPS 总览: 为每个技能组计算 DPS
+    const dpsContainer = document.getElementById("pob-dps-list");
+    if (dpsContainer) {
+      if (player.skillGroups.length === 0) {
+        dpsContainer.innerHTML = '<div class="pob-dps-empty">未配置技能</div>';
+      } else {
+        let html = "";
+        for (const group of player.skillGroups) {
+          const computed = computeSkillGroup(group);
+          const dps = estimateDps(computed, player.offense.critChance, player.offense.critMultiplier, player.offense.attackSpeed);
+          const supportNames = group.supportGems.map(g => g.name).join(" + ");
+          html += `<div class="pob-dps-item">
+            <span class="dps-skill-name">${group.activeGem.name}${supportNames ? ` + ${supportNames}` : ""}</span>
+            <span class="dps-value">≈${dps}</span>
+          </div>`;
+        }
+        dpsContainer.innerHTML = html;
+      }
+    }
   }
   
   private updateFlaskUI() {
@@ -1726,36 +1808,124 @@ export class UIController {
     }
   }
 
+  /** PoE1 风格技能面板：按装备分组显示宝石孔与链接。 */
   private updateSkillUI() {
     const player = this.state.player;
-    const skillsPanel = document.querySelector<HTMLElement>('.center-section[data-panel-content="skills"]');
-    if (!skillsPanel) return;
-    
-    for (let i = 0; i < 3; i++) {
-      const slotElement = skillsPanel.querySelector(`[data-key="${i + 1}"] .skill-content`);
-      if (!slotElement) continue;
-      
-      const skillGroup = player.skillGroups[i];
-      if (skillGroup) {
-        const computed = computeSkillGroup(skillGroup);
-        const dps = estimateDps(computed, player.offense.critChance, player.offense.critMultiplier, player.offense.attackSpeed);
-        slotElement.className = `skill-content gem-${skillGroup.activeGem.color}`;
-        const supports = skillGroup.supportGems.length ? ` + ${skillGroup.supportGems.map(gem => gem.name).join(" + ")}` : "";
-        const penInfo = computed.firePenetration > 0 ? ` 🔥${computed.firePenetration}%穿` :
-          computed.coldPenetration > 0 ? ` ❄️${computed.coldPenetration}%穿` :
-          computed.lightningPenetration > 0 ? ` ⚡${computed.lightningPenetration}%穿` : "";
-        const critInfo = computed.critChanceBonus > 0 ? ` +${computed.critChanceBonus}%暴` : "";
-        slotElement.innerHTML = `
-          <strong>${skillGroup.activeGem.name} Lv.${skillGroup.activeGem.level}</strong>
-          <span class="skill-supports">${supports}</span>
-          <span class="skill-stats">${computed.totalDamage}伤 · ${computed.manaCost}魔${penInfo}${critInfo}</span>
-          <span class="skill-dps">≈${dps} DPS</span>
-        `;
-      } else {
-        slotElement.textContent = "-";
-        slotElement.className = "skill-content empty";
+    const container = document.getElementById("poe-skill-display");
+    if (!container) return;
+
+    const EQUIP_ORDER: Array<{ slot: EquipSlot; label: string }> = [
+      { slot: EquipSlot.Weapon, label: "武器" },
+      { slot: EquipSlot.Offhand, label: "副手" },
+      { slot: EquipSlot.Body, label: "胸甲" },
+      { slot: EquipSlot.Helmet, label: "头盔" },
+      { slot: EquipSlot.Gloves, label: "手套" },
+      { slot: EquipSlot.Boots, label: "鞋子" },
+    ];
+
+    const GEM_COLOR_MAP: Record<string, string> = {
+      [GemColor.Red]: "red",
+      [GemColor.Green]: "green",
+      [GemColor.Blue]: "blue",
+      [GemColor.White]: "white",
+    };
+
+    const SLOT_LABEL: Record<string, string> = {
+      weapon: "武器",
+      offhand: "副手",
+      body: "胸甲",
+      helmet: "头盔",
+      gloves: "手套",
+      boots: "鞋子",
+    };
+
+    let html = "";
+    let hasAnySockets = false;
+
+    for (const { slot, label } of EQUIP_ORDER) {
+      const item = player.equipment[slot];
+      if (!item || item.sockets.length === 0) continue;
+      hasAnySockets = true;
+
+      const linkGroups = getLinkGroups(item.sockets);
+      const maxLink = Math.max(0, ...linkGroups.map(g => g.socketIndices.length));
+
+      // 按链接组渲染
+      let socketsHtml = "";
+      let skillInfoHtml = "";
+
+      for (const group of linkGroups) {
+        const indices = group.socketIndices;
+        const gemsInGroup = group.gems.filter((g): g is GemData => g !== null);
+        const activeGem = gemsInGroup.find(g => g.type === GemType.Active);
+        const supportGems = gemsInGroup.filter(g => g.type === GemType.Support);
+
+        // 渲染孔位与链接线
+        let groupSocketsHtml = "";
+        for (let si = 0; si < indices.length; si++) {
+          const socket = item.sockets[indices[si]];
+          const colorClass = GEM_COLOR_MAP[socket.color] || "white";
+          const gemData = socket.gemId ? getGemById(socket.gemId) : null;
+          const filled = gemData ? " filled" : "";
+          const tooltipAttr = gemData ? ` data-tooltip-gem-id="${gemData.id}"` : "";
+          const gemName = gemData ? gemData.name : "";
+
+          groupSocketsHtml += `<div class="poe-socket ${colorClass}${filled}"${tooltipAttr}><span class="poe-gem-name">${gemName}</span></div>`;
+
+          // 链接线
+          if (si < indices.length - 1) {
+            const nextSocket = item.sockets[indices[si + 1]];
+            const linked = socket.linkedTo.includes(indices[si + 1]);
+            if (linked) {
+              const linkColor = GEM_COLOR_MAP[socket.color] || "white";
+              groupSocketsHtml += `<div class="poe-link-line linked ${linkColor}"></div>`;
+            } else {
+              groupSocketsHtml += `<div class="poe-link-line unlinked"></div>`;
+            }
+          }
+        }
+        socketsHtml += `<div class="poe-link-group">${groupSocketsHtml}</div>`;
+
+        // 技能信息
+        if (activeGem) {
+          const skillGroup = player.skillGroups.find(
+            sg => sg.activeGem.id === activeGem.id || sg.id.includes(`${item.id}_${group.id}`)
+          ) || player.skillGroups.find(sg => sg.activeGem.id === activeGem.id);
+          if (skillGroup) {
+            const computed = computeSkillGroup(skillGroup);
+            const dps = estimateDps(computed, player.offense.critChance, player.offense.critMultiplier, player.offense.attackSpeed);
+            const gemColor = GEM_COLOR_MAP[activeGem.color] || "white";
+            const supportNames = supportGems.map(g => g.name).join(" + ");
+            skillInfoHtml += `
+              <div class="poe-skill-info">
+                <span class="poe-skill-name gem-${gemColor}">${activeGem.name} Lv.${skillGroup.activeGem.level}</span>
+                ${supportNames ? `<span class="poe-skill-supports">+ ${supportNames}</span>` : ""}
+                <span class="poe-skill-dps">≈${dps} DPS</span>
+              </div>
+            `;
+          }
+        }
       }
+
+      const rarityClass = `rarity-${item.rarity}`;
+      html += `
+        <div class="poe-equip-card" data-tooltip-item-id="${item.id}">
+          <div class="poe-equip-header">
+            <span class="poe-equip-name ${rarityClass}">${label}</span>
+            <span class="poe-equip-detail">${item.sockets.length}孔${maxLink > 1 ? ` ${maxLink}连` : ""}</span>
+          </div>
+          <div class="poe-socket-area">${socketsHtml}</div>
+          ${skillInfoHtml}
+        </div>
+      `;
     }
+
+    if (!hasAnySockets) {
+      html = '<div class="poe-skill-empty">装备武器或防具以显示宝石孔</div>';
+    }
+
+    container.innerHTML = html;
+    this.bindTooltips(container);
   }
   
   private awardGemExperience(amount: number) {
@@ -1775,79 +1945,60 @@ export class UIController {
   }
 
   /** 存储中心右栏：背包装备 / 通货 / 宝石 同屏展示，无需翻页。 */
+  /** 根据物品类型返回网格 CSS 类 */
+  private getGridItemClass(item: Item): string {
+    switch (item.slot) {
+      case "weapon": case "offhand": case "body": return "grid-item-2x3";
+      case "helmet": case "gloves": case "boots": return "grid-item-2x2";
+      case "belt": case "amulet": case "ring1": case "ring2": return "grid-item-1x1";
+      default: return "grid-item-1x1";
+    }
+  }
+
   private updateInventoryUI() {
     const player = this.state.player;
     const content = document.getElementById("inventory-content");
     if (!content) return;
 
-    // 装备
-    let itemsHtml = "";
-    if (player.inventory.items.length === 0) {
-      itemsHtml = '<div class="inventory-empty">暂无装备</div>';
-    } else {
-      for (const item of player.inventory.items) {
-        itemsHtml += `
-          <div class="inventory-item rarity-${item.rarity}" data-item-id="${item.id}" data-tooltip-item-id="${item.id}">
-            <span class="item-name">${item.name}</span>
-            <span class="item-level">Lv.${item.itemLevel}${this.getItemComparisonLabel(item)}</span>
-          </div>
-        `;
-      }
+    let html = "";
+
+    // 装备: PoE1 风格网格占格
+    for (const item of player.inventory.items) {
+      const gridClass = this.getGridItemClass(item);
+      html += `<div class="grid-item ${gridClass} rarity-${item.rarity}" data-item-id="${item.id}" data-tooltip-item-id="${item.id}" draggable="true">
+        <span class="grid-item-name">${item.name}</span>
+      </div>`;
     }
 
-    // 通货
-    let currencyHtml = "";
-    if (player.inventory.currencies.size === 0) {
-      currencyHtml = '<div class="inventory-empty">暂无通货</div>';
-    } else {
-      player.inventory.currencies.forEach((count, id) => {
-        const currency = getCurrencyById(id);
-        if (currency && count > 0) {
-          currencyHtml += `
-            <div class="inventory-currency" data-currency-id="${id}" data-tooltip-currency-id="${id}">
-              <span class="currency-name">${currency.name}</span>
-              <span class="currency-count">×${count}</span>
-            </div>
-          `;
-        }
-      });
+    // 通货: 1×1 格子
+    player.inventory.currencies.forEach((count, id) => {
+      if (count <= 0) return;
+      const currency = getCurrencyById(id);
+      if (!currency) return;
+      html += `<div class="grid-item grid-item-1x1" data-currency-id="${id}" data-tooltip-currency-id="${id}">
+        <span class="grid-item-name">💰${count > 1 ? `×${count}` : ""}</span>
+      </div>`;
+    });
+
+    // 宝石: 1×1 格子
+    for (const gem of player.inventory.gems) {
+      const gemData = getGemById(gem.id);
+      if (!gemData) continue;
+      const colorClass = `gem-${gem.color}`;
+      html += `<div class="grid-item grid-item-1x1 ${colorClass}" data-gem-id="${gem.id}" data-tooltip-gem-id="${gem.id}">
+        <span class="grid-item-name">💎</span>
+      </div>`;
     }
 
-    // 宝石
-    let gemsHtml = "";
-    if (player.inventory.gems.length === 0) {
-      gemsHtml = '<div class="inventory-empty">暂无宝石</div>';
-    } else {
-      for (const gem of player.inventory.gems) {
-        const gemData = getGemById(gem.id);
-        if (!gemData) continue;
-        gemsHtml += `
-          <div class="inventory-gem gem-${gem.color}" data-gem-id="${gem.id}" data-tooltip-gem-id="${gem.id}" title="${gemData.name}">
-            <span class="gem-dot gem-${gem.color}"></span>
-          </div>
-        `;
-      }
+    if (!html) {
+      html = '<div class="inventory-empty">暂无物品</div>';
     }
 
-    content.innerHTML = `
-      <div class="backpack-section">
-        <div class="backpack-section-title">装备</div>
-        <div class="backpack-items">${itemsHtml}</div>
-      </div>
-      <div class="backpack-section">
-        <div class="backpack-section-title">通货</div>
-        <div class="backpack-currencies">${currencyHtml}</div>
-      </div>
-      <div class="backpack-section">
-        <div class="backpack-section-title">宝石</div>
-        <div class="backpack-gems">${gemsHtml}</div>
-      </div>
-    `;
+    content.innerHTML = html;
     this.bindTooltips(content);
 
-    // 装备：可拖拽到仓库，点击查看详情
-    content.querySelectorAll<HTMLElement>(".inventory-item").forEach((element) => {
-      element.draggable = true;
+    // 绑定装备事件: 拖拽、双击合成、点击详情
+    content.querySelectorAll<HTMLElement>(".grid-item[data-item-id]").forEach((element) => {
       element.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", JSON.stringify({ source: "inventory", itemId: element.dataset.itemId }));
       });
@@ -1856,12 +2007,13 @@ export class UIController {
         if (itemId) this.selectCraftingTarget(itemId);
       });
       element.addEventListener("click", () => {
-        const item = player.inventory.items.find((candidate) => candidate.id === element.dataset.itemId);
+        const item = player.inventory.items.find(c => c.id === element.dataset.itemId);
         if (item) this.showItemDetails(item, false);
       });
     });
 
-    content.querySelectorAll(".inventory-gem").forEach((el) => {
+    // 宝石点击
+    content.querySelectorAll(".grid-item[data-gem-id]").forEach((el) => {
       el.addEventListener("click", () => {
         const gemId = (el as HTMLElement).dataset.gemId || "";
         const gem = getGemById(gemId);
@@ -1869,7 +2021,8 @@ export class UIController {
       });
     });
 
-    content.querySelectorAll(".inventory-currency").forEach((el) => {
+    // 通货点击
+    content.querySelectorAll(".grid-item[data-currency-id]").forEach((el) => {
       el.addEventListener("click", () => {
         const currencyId = (el as HTMLElement).dataset.currencyId;
         this.useCurrency(currencyId || "");
@@ -1953,35 +2106,109 @@ export class UIController {
     this.autoSave();
   }
 
+  /** 当前仓库标签 */
+  private stashTab: "currency" | "equipment" | "gems" | "general" = "currency";
+  private stashTabsBound = false;
+
+  private initStashTabs() {
+    if (this.stashTabsBound) return;
+    const tabBar = document.getElementById("stash-tab-bar");
+    if (!tabBar) return;
+    this.stashTabsBound = true;
+    tabBar.querySelectorAll<HTMLElement>(".stash-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        this.stashTab = (tab.dataset.stashTab as any) || "currency";
+        tabBar.querySelectorAll(".stash-tab").forEach(t => t.classList.remove("active"));
+        tab.classList.add("active");
+        this.updateStashUI();
+      });
+    });
+  }
+
+  /** 按标签分类仓库物品 */
+  private getStashItemsByTab(): Item[] {
+    const stash = this.getStash();
+    switch (this.stashTab) {
+      case "currency": return []; // 通货走 currencies，不在 items 里
+      case "equipment": return stash.items.filter(item => ["weapon", "offhand", "helmet", "body", "gloves", "boots", "belt", "amulet", "ring1", "ring2"].includes(item.slot));
+      case "gems": return []; // 宝石走 stash.gems
+      case "general": return stash.items.filter(item => !["weapon", "offhand", "helmet", "body", "gloves", "boots", "belt", "amulet", "ring1", "ring2"].includes(item.slot));
+      default: return stash.items;
+    }
+  }
+
   private updateStashUI() {
-    const grid = document.getElementById("stash-grid");
+    this.initStashTabs();
+    const grid = document.getElementById("stash-grid-poe");
     const capacity = document.querySelector(".stash-capacity");
     if (!grid) return;
     const stash = this.getStash();
-    const items = stash.items;
-    if (capacity) capacity.textContent = `${items.length} / ${stash.maxSlots}`;
+    if (capacity) capacity.textContent = `${stash.items.length} / ${stash.maxSlots}`;
+
     let html = "";
-    for (let index = 0; index < stash.maxSlots; index++) {
-      const item = items[index];
-      html += item
-        ? `<div class="stash-cell filled rarity-${item.rarity}" draggable="true" data-stash-item-id="${item.id}" data-tooltip-item-id="${item.id}"><span>★</span><small>${item.name}</small></div>`
-        : `<div class="stash-cell" data-stash-empty="true"><span>＋</span></div>`;
+    if (this.stashTab === "currency") {
+      // 通货标签: 显示仓库中的通货
+      stash.currencies.forEach((count, id) => {
+        if (count <= 0) return;
+        const currency = getCurrencyById(id);
+        if (!currency) return;
+        html += `<div class="stash-cell-poe filled" draggable="true" data-stash-currency-id="${id}" data-tooltip-currency-id="${id}">
+          <span>💰</span><small>${currency.name} ×${count}</small>
+        </div>`;
+      });
+      if (!html) html = '<div class="stash-cell-poe"><span style="font-size:11px;color:var(--text-dim)">暂无通货</span></div>';
+    } else if (this.stashTab === "gems") {
+      // 宝石标签
+      stash.gems.forEach((gem) => {
+        const gemData = getGemById(gem.id);
+        if (!gemData) return;
+        const colorClass = `gem-${gem.color}`;
+        html += `<div class="stash-cell-poe filled ${colorClass}" draggable="true" data-stash-gem-id="${gem.id}" data-tooltip-gem-id="${gem.id}">
+          <span>💎</span><small>${gem.name}</small>
+        </div>`;
+      });
+      if (!html) html = '<div class="stash-cell-poe"><span style="font-size:11px;color:var(--text-dim)">暂无宝石</span></div>';
+    } else {
+      // 装备/通用标签: 显示仓库物品
+      const items = this.getStashItemsByTab();
+      for (const item of items) {
+        html += `<div class="stash-cell-poe filled rarity-${item.rarity}" draggable="true" data-stash-item-id="${item.id}" data-tooltip-item-id="${item.id}">
+          <span>★</span><small>${item.name}</small>
+        </div>`;
+      }
+      // 填充空格子
+      const emptyCount = Math.max(0, 18 - items.length);
+      for (let i = 0; i < emptyCount; i++) {
+        html += `<div class="stash-cell-poe" data-stash-empty="true"><span>＋</span></div>`;
+      }
     }
+
     grid.innerHTML = html;
     this.bindTooltips(grid);
+
+    // 绑定物品事件
     grid.querySelectorAll<HTMLElement>("[data-stash-item-id]").forEach((cell) => {
       cell.addEventListener("dblclick", () => {
         const itemId = cell.dataset.stashItemId;
         if (itemId) this.selectCraftingTarget(itemId);
       });
       cell.addEventListener("click", () => {
-        const item = stash.items.find(candidate => candidate.id === cell.dataset.stashItemId);
+        const item = stash.items.find(c => c.id === cell.dataset.stashItemId);
         if (item) this.showItemDetails(item, false);
       });
       cell.addEventListener("dragstart", (event) => {
         event.dataTransfer?.setData("text/plain", JSON.stringify({ source: "stash", itemId: cell.dataset.stashItemId }));
       });
     });
+
+    // 通货拖拽
+    grid.querySelectorAll<HTMLElement>("[data-stash-currency-id]").forEach((cell) => {
+      cell.addEventListener("click", () => {
+        this.useCurrency(cell.dataset.stashCurrencyId || "");
+      });
+    });
+
+    // 空格子放置
     grid.querySelectorAll<HTMLElement>("[data-stash-empty]").forEach((cell) => {
       cell.addEventListener("dragover", (event) => { event.preventDefault(); cell.classList.add("drop-target"); });
       cell.addEventListener("dragleave", () => cell.classList.remove("drop-target"));

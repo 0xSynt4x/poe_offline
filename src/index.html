@@ -192,38 +192,74 @@
             </div>
           </section>
 
-          <!-- 装备面板 -->
+          <!-- 装备面板 → PoB 风格属性面板 -->
           <section class="center-section" data-panel-content="equipment">
-            <h3 class="panel-title">装备</h3>
-            <div class="equipment-grid">
-              <div class="equip-slot" data-slot="helmet"><span class="slot-label">头</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="amulet"><span class="slot-label">项链</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="body"><span class="slot-label">胸</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="ring1"><span class="slot-label">戒指1</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="gloves"><span class="slot-label">手</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="ring2"><span class="slot-label">戒指2</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="belt"><span class="slot-label">腰</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="boots"><span class="slot-label">脚</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="offhand"><span class="slot-label">副手</span><div class="slot-content empty">-</div></div>
-              <div class="equip-slot" data-slot="weapon"><span class="slot-label">武器</span><div class="slot-content empty">-</div></div>
+            <div class="pob-header">
+              <h3 class="panel-title">⚔️ 装备与属性</h3>
+            </div>
+            <div class="pob-layout">
+              <!-- 左列: 装备槽 -->
+              <div class="pob-equip-col">
+                <div class="pob-section-title">装备</div>
+                <div class="equipment-grid">
+                  <div class="equip-slot" data-slot="weapon"><span class="slot-label">武器</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="offhand"><span class="slot-label">副手</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="helmet"><span class="slot-label">头盔</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="body"><span class="slot-label">胸甲</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="gloves"><span class="slot-label">手套</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="boots"><span class="slot-label">鞋子</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="belt"><span class="slot-label">腰带</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="amulet"><span class="slot-label">项链</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="ring1"><span class="slot-label">戒指1</span><div class="slot-content empty">-</div></div>
+                  <div class="equip-slot" data-slot="ring2"><span class="slot-label">戒指2</span><div class="slot-content empty">-</div></div>
+                </div>
+              </div>
+              <!-- 右列: 属性分区 -->
+              <div class="pob-stats-col">
+                <div class="pob-section-title">角色属性</div>
+                <div id="pob-stats-container">
+                  <div class="pob-attr-section">
+                    <div class="pob-attr-header">生命/魔力/护盾</div>
+                    <div class="pob-attr-row"><span>生命</span><strong id="pob-life">500 / 500</strong></div>
+                    <div class="pob-attr-row"><span>魔力</span><strong id="pob-mana">100 / 100</strong></div>
+                    <div class="pob-attr-row"><span>能量护盾</span><strong id="pob-es">0</strong></div>
+                    <div class="pob-attr-row"><span>护甲</span><strong id="pob-armor">100</strong></div>
+                    <div class="pob-attr-row"><span>闪避</span><strong id="pob-evasion">50</strong></div>
+                  </div>
+                  <div class="pob-attr-section">
+                    <div class="pob-attr-header">抗性</div>
+                    <div class="pob-attr-row"><span>🔥 火焰</span><strong id="pob-fire-res">0%</strong></div>
+                    <div class="pob-attr-row"><span>❄️ 冰霜</span><strong id="pob-cold-res">0%</strong></div>
+                    <div class="pob-attr-row"><span>⚡ 闪电</span><strong id="pob-light-res">0%</strong></div>
+                    <div class="pob-attr-row"><span>☠️ 混沌</span><strong id="pob-chaos-res">-30%</strong></div>
+                  </div>
+                  <div class="pob-attr-section">
+                    <div class="pob-attr-header">攻击</div>
+                    <div class="pob-attr-row"><span>伤害加成</span><strong id="pob-damage">0%</strong></div>
+                    <div class="pob-attr-row"><span>攻击速度</span><strong id="pob-speed">1.00</strong></div>
+                    <div class="pob-attr-row"><span>暴击率</span><strong id="pob-crit">5%</strong></div>
+                    <div class="pob-attr-row"><span>暴击伤害</span><strong id="pob-crit-mult">150%</strong></div>
+                  </div>
+                  <div class="pob-attr-section pob-dps-section">
+                    <div class="pob-attr-header">DPS 总览</div>
+                    <div id="pob-dps-list"></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
 
           <!-- 技能面板 -->
           <section class="center-section" data-panel-content="skills">
             <h3 class="panel-title">技能组 <span class="panel-subtitle">链接中的辅助宝石会自动生效</span></h3>
-            <div class="skill-slots">
-              <div class="skill-slot" data-key="1"><span class="skill-key">1</span><div class="skill-content empty">-</div></div>
-              <div class="skill-slot" data-key="2"><span class="skill-key">2</span><div class="skill-content empty">-</div></div>
-              <div class="skill-slot" data-key="3"><span class="skill-key">3</span><div class="skill-content empty">-</div></div>
-            </div>
+            <div id="poe-skill-display" class="poe-skill-display"></div>
             <div class="build-actions">
               <button id="btn-build-import" class="small-btn">导入 Build</button>
               <button id="btn-build-export" class="small-btn">导出 Build</button>
             </div>
           </section>
 
-          <!-- 存储中心 -->
+          <!-- 存储中心 → PoE1 三栏布局 -->
           <section class="center-section stash-panel" data-panel-content="inventory">
             <div class="stash-heading">
               <div>
@@ -233,17 +269,25 @@
               <span class="stash-capacity">0 / 60</span>
             </div>
             <div class="storage-layout">
+              <!-- 左栏: 标签式仓库 -->
               <div class="storage-col stash-col">
-                <div class="storage-col-title">仓库</div>
-                <div class="stash-grid" id="stash-grid"></div>
+                <div class="stash-tab-bar" id="stash-tab-bar">
+                  <button class="stash-tab active" data-stash-tab="currency">通货</button>
+                  <button class="stash-tab" data-stash-tab="equipment">装备</button>
+                  <button class="stash-tab" data-stash-tab="gems">宝石</button>
+                  <button class="stash-tab" data-stash-tab="general">通用</button>
+                </div>
+                <div class="stash-grid-poe" id="stash-grid-poe"></div>
               </div>
+              <!-- 中栏: 合成台 -->
               <div class="storage-col craft-col">
                 <div class="storage-col-title">合成台</div>
                 <div id="craft-table"></div>
               </div>
+              <!-- 右栏: PoE1 风格网格背包 -->
               <div class="storage-col backpack-col">
                 <div class="storage-col-title">背包</div>
-                <div id="inventory-content" class="inventory-list"><div class="inventory-empty">暂无物品</div></div>
+                <div id="inventory-content" class="inventory-grid-poe"></div>
               </div>
             </div>
           </section>
@@ -274,13 +318,11 @@
 
     </main>
 
-    <!-- 底部操作栏 -->
+    <!-- 底部操作栏: 动态技能动作栏 -->
     <footer id="footer">
       <div id="flask-bar" aria-label="药剂槽位"></div>
+      <div id="skill-action-bar"></div>
       <div id="action-buttons">
-        <button class="action-btn">1: 裂风斩</button>
-        <button class="action-btn">2: 闪电箭</button>
-        <button class="action-btn">3: 闪避</button>
         <span class="action-hint">面板请从左侧导航打开</span>
       </div>
     </footer>
